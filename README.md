@@ -101,7 +101,8 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 ## 文件
 
 - `server.ts` — Express 服务：静态站点、登录、账号、付费、受保护的协作接口
-- `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`
+- `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`；`device`（桌面软件配对，云端）；`localmode`（桌面模式，本机）
+- `desktop/main.cjs` — Electron 外壳；`views/pair.html` — 配对页
 - `billing/` — 试用与使用权、订单与支付事件处理、定价 / 下单 / 回调接口
 - `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）
 - `finalizer/` — 收尾 Agent：`types` `extract`（围栏识别与布局）`validate`（计划校验、路径与文件快照、机器检查）`executor`（Docker / 宿主执行）`service`（版本冻结、主流程、报告）`agent`（接入项目 agent）
@@ -110,6 +111,23 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 - `views/app.html` — 工作台页面（仅经鉴权路由返回）
 - `scripts/` — `grant-entitlement` `confirm-order` `list-users`
 - `docs/` — 两份评审稿原文
+
+## 桌面软件（保留本机 agent 识别与剪贴板中转）
+
+同一套代码可以打包成桌面应用：服务在用户自己的电脑上运行，识别本机 agent、剪贴板中转、一键发送全部可用；只有账号与使用权向 peergrading.ai 核对。
+
+**配对流程**：软件首次打开显示 8 位配对码 → 点「在浏览器中登录并确认」打开 `peergrading.ai/device?code=…` → 登录（首次自动建号）并确认 → 软件拿到长期设备令牌。此后每次开始协作前向云端记一次试用用量并取回最新使用权；离线时沿用 72 小时内的缓存。账号页可查看并断开设备。
+
+```bash
+npm run desktop               # 本地开发：打包并启动 Electron（连接 https://peergrading.ai）
+npm run desktop:local-cloud   # 连接本机 3001 端口的开发用云端
+npm run dist:mac              # 生成 release/PeerGrading-*.dmg（未签名；公开分发需 Apple 开发者账号签名与公证）
+npm run dist:win              # Windows 安装包（需在 Windows 或配好交叉打包环境）
+```
+
+- 桌面模式由环境变量 `LOCAL_MODE=1` 开启（Electron 自动设置），数据放在系统的应用数据目录；`CLOUD_URL` 指向云端（默认 `https://peergrading.ai`）。
+- Electron 44 自带 Node 24，直接运行 `dist/server.mjs`（esbuild 打包的同一份服务）。
+- 云端接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（网页确认）、`GET /api/device/me`、`POST /api/device/usage`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。
 
 ## 部署到 peergrading.ai
 

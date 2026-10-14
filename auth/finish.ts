@@ -13,7 +13,7 @@ function finish(req: Request, tx: any, identity: VerifiedIdentity): { redirect: 
     const session: any = readSession(req);
     if ((session?.id || null) !== (tx.session_id || null)) throw new AuthError("stale_tx");
     if (tx.user_id && session?.user_id !== tx.user_id) throw new AuthError("stale_tx");
-    const back = (path: string, k: string, v: string) => { const [p, h = ""] = path.split("#"); return `${p}?${k}=${v}${h ? "#" + h : ""}`; };
+    const back = (path: string, k: string, v: string) => { const [p, h = ""] = path.split("#"); return `${p}${p.includes("?") ? "&" : "?"}${k}=${v}${h ? "#" + h : ""}`; };
 
     if (tx.intent === "bind") {
       if (!tx.verified_at || tx.verified_at <= now() - config.reverifyWindowSec || session.last_verified_at <= now() - config.reverifyWindowSec) {

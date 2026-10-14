@@ -144,6 +144,25 @@ CREATE TABLE IF NOT EXISTS payment_events (
   processed_at INTEGER,
   UNIQUE(provider, merchant_id, event_id)
 );
+-- 桌面软件配对：设备授权码（短期）与设备令牌（长期、可撤销）
+CREATE TABLE IF NOT EXISTS device_codes (
+  device_code TEXT PRIMARY KEY,
+  user_code   TEXT NOT NULL UNIQUE,
+  user_id     INTEGER,
+  device_name TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','consumed','denied')),
+  created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+  expires_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id           TEXT PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_name  TEXT,
+  created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+  last_seen_at INTEGER,
+  revoked_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
 -- 试用用量：每次开始协作记一条
 CREATE TABLE IF NOT EXISTS usage_events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

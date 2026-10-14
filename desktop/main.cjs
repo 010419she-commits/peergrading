@@ -1,0 +1,50 @@
+// desktop/main.cjs — Electron 外壳：在本机启动服务（桌面模式），窗口里打开工作台
+const { app, BrowserWindow, shell, Menu } = require("electron");
+const path = require("node:path");
+const net = require("node:net");
+const { execFileSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
+
+// Finder 启动的应用 PATH 很短，拿不到 claude / qwen / codex；用登录 shell 的 PATH 补上
+function fixPath() {
+  if (process.platform === "win32") return;
+  try {
+    const shellPath = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", "echo -n $PATH"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (shellPath) process.env.PATH = shellPath;
+  } catch {}
+  for (const d of ["/opt/homebrew/bin", "/usr/local/bin", path.join(app.getPath("home"), ".local", "bin")]) if (!process.env.PATH.includes(d)) process.env.PATH += `:${d}`;
+}
+const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); s.on("error", reject); });
+const waitFor = (url, ms = 15000) => new Promise((resolve, reject) => { const t0 = Date.now(); (function tick() { fetch(url).then((r) => (r.ok ? resolve() : retry())).catch(retry); function retry() { Date.now() - t0 > ms ? reject(new Error("服务未启动")) : setTimeout(tick, 200); } })(); });
+
+let win;
+async function start() {
+  fixPath();
+  const userData = app.getPath("userData");
+  process.env.LOCAL_MODE = "1";
+  process.env.DATA_DIR = path.join(userData, "data");
+  process.env.SESSIONS_DIR = path.join(userData, "sessions");
+  process.env.CLOUD_URL = process.env.CLOUD_URL || "https://peergrading.ai";
+  process.env.PORT = String(await freePort());
+  process.env.HOST = "127.0.0.1";
+  await import(pathToFileURL(path.join(__dirname, "..", "dist", "server.mjs")).href);
+  const base = `http://127.0.0.1:${process.env.PORT}`;
+  await waitFor(`${base}/api/auth/bootstrap`);
+
+  win = new BrowserWindow({
+    width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: "#10141b", title: "PeerGrading",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  // 页面里 target=_blank 的链接（登录 / 账号 / 购买）用系统浏览器打开
+  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+  win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith(base)) { e.preventDefault(); shell.openExternal(url); } });
+  await win.loadURL(`${base}/`);
+}
+
+Menu.setApplicationMenu(Menu.buildFromTemplate([
+  { role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
+]));
+app.whenReady().then(start).catch((e) => { console.error(e); app.quit(); });
+app.on("window-all-closed", () => app.quit());
+app.on("activate", () => { if (!win) start(); });

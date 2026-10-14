@@ -12,6 +12,8 @@ import { requireCsrf } from "./auth/security.ts";
 import { auth, account } from "./auth/routes.ts";
 import { cleanupTx } from "./auth/tx.ts";
 import { billing, paymentWebhook } from "./billing/routes.ts";
+import { device, cleanupDeviceCodes } from "./auth/device.ts";
+import { localMode, local, isPaired, cachedUser, reportUsage, cloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor } from "./agents/detect.ts";
@@ -22,7 +24,8 @@ import { dockerAvailable } from "./finalizer/executor.ts";
 import type { Version } from "./finalizer/types.ts";
 
 const here = config.root;
-const SESSIONS = path.join(here, "sessions");
+const SESSIONS = process.env.SESSIONS_DIR || path.join(here, "sessions");
+const HOST = process.env.HOST || (localMode ? "127.0.0.1" : "0.0.0.0");
 const runs = new Map<string, AbortController>();
 
 const app = express();
@@ -36,16 +39,27 @@ app.use(cookieParser());
 app.use(express.json({ limit: "200kb" }));
 app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 app.use(attachBrowser);
-app.use(attachUser);
-app.use(["/api", "/auth", "/login", "/app", "/account"], noStore);
-
-app.use(auth);
-app.use("/api/account", account);
-app.use(billing);
-
-/* ---------- 产品页面（需登录 + 试用/会员） ---------- */
-app.get("/app", requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));
-app.get(["/account", "/account.html"], (_req, res) => res.sendFile(path.join(here, "public", "account.html")));
+if (localMode) {
+  // 桌面软件：用户来自与 peergrading.ai 配对后的缓存，不做本地登录
+  app.use((req, _res, next) => { (req as any).user = cachedUser(); (req as any).session = null; next(); });
+  app.use(["/api", "/app", "/pair"], noStore);
+  app.use(local);
+  app.get("/", (_req, res) => res.redirect(isPaired() ? "/app" : "/pair"));
+  app.get("/pair", (_req, res) => res.sendFile(path.join(here, "views", "pair.html")));
+  app.get("/app", (_req, res) => isPaired() ? res.sendFile(path.join(here, "views", "app.html")) : res.redirect("/pair"));
+  app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${cloudUrl}/account`));
+} else {
+  app.use(attachUser);
+  app.use(["/api", "/auth", "/login", "/app", "/account", "/device"], noStore);
+  app.use(auth);
+  app.use("/api/account", account);
+  app.use(billing);
+  app.use(device);
+  /* ---------- 产品页面（需登录 + 试用/会员） ---------- */
+  app.get("/app", requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));
+  app.get(["/account", "/account.html"], (_req, res) => res.sendFile(path.join(here, "public", "account.html")));
+  app.get(["/device", "/device.html"], (_req, res) => res.sendFile(path.join(here, "public", "device.html")));
+}
 
 /* ---------- 协作接口（全部需登录；开始协作需使用权） ---------- */
 const api = express.Router();
@@ -116,7 +130,10 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     fs.mkdirSync(workspace, { recursive: true });
     cfg = await buildConfig(req.body, workspace);
   } catch (e: any) { return res.status(400).json({ error: e.message }); }
-  recordUsage(u, id);
+  if (localMode) {
+    try { await reportUsage(id); }
+    catch (e: any) { return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
+  } else recordUsage(u, id);
   const ac = new AbortController();
   runs.set(id, ac);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
@@ -227,8 +244,9 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   res.status(500).type("text").send("服务暂时不可用，请稍后重试");
 });
 
-setInterval(() => { cleanupTx(); cleanupBrowsers(); }, 10 * 60 * 1000).unref();
-app.listen(config.port, () => {
-  console.log(`${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${!!config.wechat.open.appId})`);
+setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
+app.listen(config.port, HOST, () => {
+  console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${cloudUrl}, paired=${isPaired()})`
+    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${!!config.wechat.open.appId})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

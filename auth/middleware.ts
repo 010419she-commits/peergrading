@@ -25,7 +25,7 @@ export const requireEntitlementApi = (code: string) => (req: Request, res: Respo
 export const requireAccessApi = (req: Request, res: Response, next: NextFunction) => {
   const u = (req as any).user;
   if (!u) return res.status(401).json({ error: "unauthenticated" });
-  const a = accessStatus(u);
+  const a = u.access ?? accessStatus(u);   // 桌面模式：使用权由云端核对后缓存在 user.access
   if (!a.allowed) return res.status(403).json({ error: "payment_required", access: a });
   (req as any).access = a;
   next();

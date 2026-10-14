@@ -7,12 +7,18 @@ let csrf = "", me = null;
 const _fetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
   if (opts.method && opts.method !== "GET") opts.headers = { ...(opts.headers || {}), "x-csrf-token": csrf };
-  return _fetch(url, opts).then((r) => { if (r.status === 401 && String(url).startsWith("/api/")) location.assign("/?login=required"); return r; });
+  return _fetch(url, opts).then((r) => { if (r.status === 401 && String(url).startsWith("/api/")) location.assign(localMode ? "/pair" : "/?login=required"); return r; });
 };
+let localMode = false, cloudUrl = "";
 async function bootstrapAuth() {
   const r = await _fetch("/api/auth/bootstrap"); const d = await r.json();
-  csrf = d.csrf; me = d.user;
-  if (!me) { location.assign("/?login=required"); return false; }
+  csrf = d.csrf; me = d.user; localMode = !!d.localMode; cloudUrl = d.cloudUrl || "";
+  if (!me) { location.assign(localMode ? "/pair" : "/?login=required"); return false; }
+  if (localMode) {
+    const acc = document.querySelector('.titlebar a[href="/account"]'); if (acc) { acc.href = cloudUrl + "/account"; acc.target = "_blank"; acc.rel = "noopener"; }
+    const pw = document.querySelector('#paywall a'); if (pw) { pw.href = cloudUrl + "/account#pricing"; pw.target = "_blank"; pw.rel = "noopener"; }
+    const lo = $("#logout-btn"); if (lo) { lo.textContent = t("unpair"); lo.onclick = async () => { if (!confirm(t("unpairConfirm"))) return; await fetch("/api/local/unpair", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); location.assign("/pair"); }; }
+  }
   renderAccess(); return true;
 }
 function renderAccess() {

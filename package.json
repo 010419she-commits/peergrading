@@ -1,15 +1,20 @@
 {
-  "name": "dual-agent-review-loop",
-  "version": "0.1.0",
+  "name": "peergrading",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "两个 Claude Agent 互相审查、讨论、修改的协作循环（网页版）",
+  "description": "PeerGrading · 两个 AI 智能体互相审查、讨论、修改的协作循环（网站 + 桌面软件）",
   "scripts": {
     "start": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env server.ts",
     "dev": "DEV_LOGIN=1 node --no-warnings=ExperimentalWarning --env-file-if-exists=.env server.ts",
     "grant": "node --no-warnings=ExperimentalWarning scripts/grant-entitlement.ts",
     "confirm-order": "node --no-warnings=ExperimentalWarning scripts/confirm-order.ts",
-    "users": "node --no-warnings=ExperimentalWarning scripts/list-users.ts"
+    "users": "node --no-warnings=ExperimentalWarning scripts/list-users.ts",
+    "bundle": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "desktop": "npm run bundle && ELECTRON_RUN_AS_NODE= electron .",
+    "desktop:local-cloud": "npm run bundle && CLOUD_URL=http://localhost:3001 electron .",
+    "dist:mac": "npm run bundle && electron-builder --mac",
+    "dist:win": "npm run bundle && electron-builder --win"
   },
   "engines": {
     "node": ">=24"
@@ -19,5 +24,45 @@
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3",
     "google-auth-library": "^9.15.1"
+  },
+  "main": "desktop/main.cjs",
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "ai.peergrading.desktop",
+    "productName": "PeerGrading",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**",
+      "dist/**",
+      "public/**",
+      "views/**",
+      "agents/**",
+      "finalizer/**",
+      "package.json",
+      "!**/*.map"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "darkModeSupport": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "dmg": {
+      "title": "PeerGrading"
+    }
   }
 }

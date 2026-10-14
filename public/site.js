@@ -13,7 +13,8 @@
 
   function initialReturnTo() {
     const p = new URLSearchParams(location.search).get("return_to");
-    if (p && /^\/(account|app)?(#[\w-]{1,40})?$/.test(p)) return p;
+    if (p && /^\/(account|app|device(\?code=[A-Z0-9-]{1,12})?)?(#[\w-]{1,40})?$/.test(p)) return p;
+    if (location.pathname === "/device") return "/device" + (location.search.match(/^\?code=[A-Z0-9-]{1,12}$/) ? location.search : "");
     return /^\/(account|app)?$/.test(location.pathname) ? location.pathname + location.hash : "/app";
   }
   function toast(msg, ms = 4000) { if (!toastEl) return; toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (toastEl.hidden = true), ms); }
@@ -38,7 +39,23 @@
     } catch { S.status = "failed"; }
     renderAll();
   }
-  function renderAll() { applyI18n(); renderNav(); renderPricing(); renderAccount(); if (dialog?.open) renderLoginForms(dialog.dataset.intent || "login"); }
+  function renderAll() { applyI18n(); renderNav(); renderPricing(); renderAccount(); renderDevicePage(); if (dialog?.open) renderLoginForms(dialog.dataset.intent || "login"); }
+
+  /* ---------- 桌面软件配对页 ---------- */
+  function renderDevicePage() {
+    const root = $("#device-root"); if (!root) return;
+    const input = $("#device-code"), status = $("#device-status");
+    const q = new URLSearchParams(location.search).get("code"); if (q && !input.value) input.value = q;
+    if (S.status === "anonymous") { status.hidden = false; status.textContent = t("deviceNeedLogin"); openLogin({ returnTo: "/device" + (q ? "?code=" + q : "") }); return; }
+    status.hidden = true;
+    const post = async (path) => {
+      const r = await postJson(path, { userCode: input.value.trim() });
+      status.hidden = false; status.className = "notice " + (r.ok ? "ok" : "warn");
+      status.textContent = r.ok ? (path.endsWith("approve") ? t("deviceApproved") : t("deviceDenied")) : (r.error === "unknown_code" ? t("deviceUnknown") : r.error === "code_unusable" ? t("deviceUnusable") : r.error === "csrf" ? t("stale") : t("opFailed"));
+    };
+    $("#device-approve").onclick = () => post("/api/device/approve");
+    $("#device-deny").onclick = () => post("/api/device/deny");
+  }
   function applyI18n() {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.querySelectorAll("[data-i18n]").forEach((n) => (n.textContent = t(n.dataset.i18n)));
@@ -240,6 +257,17 @@
     }
     if (bindRow.children.length) root.append(el("h3", { textContent: t("bindMore") }), bindRow);
     root.append(el("p", { className: "fine", textContent: S.user.recentlyVerified ? t("verifiedRecently") : t("verifyHint") }));
+    fetch("/api/device/list").then((r) => r.json()).then((d) => {
+      if (!d.devices?.length) return;
+      const list = el("ul", { className: "id-list" });
+      for (const dv of d.devices) {
+        const li = el("li", {}, el("span", { textContent: `${dv.deviceName || t("deviceUnnamed")} · ${t("deviceSince")} ${fmtDate(dv.createdAt)}${dv.lastSeenAt ? " · " + t("deviceSeen") + " " + fmtDate(dv.lastSeenAt) : ""}` }));
+        const b = el("button", { className: "text-link", type: "button", textContent: t("deviceRevoke") });
+        b.addEventListener("click", busy(b, async () => { if (!confirm(t("deviceRevokeConfirm"))) return; const r = await postJson("/api/device/revoke", { id: dv.id }); toast(r.ok ? t("deviceRevoked") : t("opFailed")); if (r.ok) li.remove(); }));
+        li.append(el("div", { className: "ops" }, b)); list.append(li);
+      }
+      root.append(el("h3", { textContent: t("devicesTitle") }), list);
+    }).catch(() => {});
     const sw = el("button", { className: "text-link", type: "button", textContent: t("switchOther") });
     sw.addEventListener("click", () => openLogin({ intent: "switch", returnTo: "/account" })); root.append(el("h3", { textContent: t("other") }), sw);
 
