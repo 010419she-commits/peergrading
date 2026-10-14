@@ -32,16 +32,23 @@ export function findBin(name: string): string | null {
       for (const sub of fs.readdirSync(d)) dirs.push(path.join(d, sub, "bin"));
     } catch {}
   }
+  const exts = process.platform === "win32" ? ["", ...(process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").toLowerCase().split(";")] : [""];
+  if (process.platform === "win32") dirs.push(path.join(process.env.APPDATA || "", "npm"), path.join(process.env.LOCALAPPDATA || "", "Programs"));
   for (const d of dirs) {
     if (!d) continue;
-    const p = path.join(d, name);
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      return p;
-    } catch {}
+    for (const ext of exts) {
+      const p = path.join(d, name + ext);
+      try {
+        fs.accessSync(p, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+        if (fs.statSync(p).isFile()) return p;
+      } catch {}
+    }
   }
   return null;
 }
+
+/** Windows 上的 .cmd / .bat 包装脚本必须经 shell 启动（Node 18.20+ 直接 spawn 会 EINVAL） */
+export const needsShell = (bin: string) => process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
 
 /** Claude 桌面版内置的 Claude Code 二进制（不在 PATH 上时作为后备） */
 function findBundledClaude(): string | null {
@@ -75,7 +82,9 @@ function cleanEnv(): NodeJS.ProcessEnv {
 
 function run(bin: string, args: string[], stdin: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { env: cleanEnv(), cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] });
+    const child = needsShell(bin)
+      ? spawn(`"${bin}"`, args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)), { env: cleanEnv(), cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"], shell: true })
+      : spawn(bin, args, { env: cleanEnv(), cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
     child.stdout.on("data", (d) => (stdout += d));
@@ -436,8 +445,11 @@ const DESKTOP_AGENT_APPS: { app: string; title: string; zh: string; en: string; 
 function detectDesktopApps(): AgentDraft[] {
   const out: AgentDraft[] = [];
   const dirs = ["/Applications", path.join(HOME, "Applications")];
+  const winDirs = process.platform === "win32" ? [path.join(process.env.LOCALAPPDATA || "", "Programs"), process.env.ProgramFiles || "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", process.env.LOCALAPPDATA || ""] : [];
   for (const a of DESKTOP_AGENT_APPS) {
-    const found = dirs.some((d) => fs.existsSync(path.join(d, `${a.app}.app`)));
+    const found = process.platform === "win32"
+      ? winDirs.some((d) => d && (fs.existsSync(path.join(d, a.app)) || fs.existsSync(path.join(d, a.app.replace(/\s+/g, ""))) || fs.existsSync(path.join(d, a.app, `${a.app}.exe`))))
+      : dirs.some((d) => fs.existsSync(path.join(d, `${a.app}.app`)));
     if (!found) continue;
     out.push({
       id: `app:${a.app}`, kind: "relay", icon: a.icon, title: /桌面版|\(/.test(a.title) ? a.title : `${a.title}（桌面应用）`,

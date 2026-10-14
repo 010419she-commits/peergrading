@@ -9,6 +9,16 @@ export function getProxyEnv(): Record<string, string> {
   const fromEnv = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy;
   if (fromEnv) {
     env.HTTPS_PROXY = fromEnv; env.HTTP_PROXY = process.env.HTTP_PROXY ?? process.env.http_proxy ?? fromEnv;
+  } else if (process.platform === "win32") {
+    try {
+      const out = execFileSync("reg", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"], { encoding: "utf8", timeout: 3000, windowsHide: true });
+      const enabled = /ProxyEnable\s+REG_DWORD\s+0x1/.test(out);
+      const server = out.match(/ProxyServer\s+REG_SZ\s+(\S+)/)?.[1];
+      if (enabled && server) {
+        const https = server.includes("=") ? (server.match(/https=([^;]+)/)?.[1] || server.match(/http=([^;]+)/)?.[1]) : server;
+        if (https) { env.HTTPS_PROXY = /^https?:\/\//.test(https) ? https : `http://${https}`; env.HTTP_PROXY = env.HTTPS_PROXY; }
+      }
+    } catch {}
   } else if (process.platform === "darwin") {
     try {
       const out = execFileSync("scutil", ["--proxy"], { encoding: "utf8", timeout: 3000 });

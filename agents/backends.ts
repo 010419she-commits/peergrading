@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from "./types.ts";
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
+import { needsShell } from "./detect.ts";
 
 function cleanEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
@@ -108,12 +109,20 @@ class CliBackend implements Backend {
   chat(req: ChatRequest): Promise<ChatResult> {
     let input = renderTranscript(req.turns, req.lang);
     const prefixed = `[System instructions]\n${req.system}\n\n${input}`;
-    const { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, req.system, prefixed);
     const bin = (this.spec as any).bin as string;
+    const viaShell = needsShell(bin);
+    // Windows .cmd 包装脚本：经 shell 启动时无法安全传递含换行/引号的长参数，系统提示词改从 stdin 前置
+    let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed);
+    if (viaShell) {
+      const i = args.indexOf("--system-prompt"); if (i >= 0) args.splice(i, 2);
+      prefixSystem = true;
+    }
     if (prefixSystem) input = prefixed;
 
     return new Promise((resolve, reject) => {
-      const child = spawn(bin, args, { env: cleanEnv(), cwd: req.cwd, stdio: ["pipe", "pipe", "pipe"] });
+      const child = viaShell
+        ? spawn(`"${bin}"`, args.map((a) => (/[\s"]/.test(a) || a === "" ? `"${a.replace(/"/g, '\\"')}"` : a)), { env: cleanEnv(), cwd: req.cwd, stdio: ["pipe", "pipe", "pipe"], shell: true })
+        : spawn(bin, args, { env: cleanEnv(), cwd: req.cwd, stdio: ["pipe", "pipe", "pipe"] });
       let buf = "", streamed = "", assistantText = "", result: string | undefined, model: string | undefined, stderr = "";
       let usage: { input: number; output: number } | undefined;
       let error: string | undefined;

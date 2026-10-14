@@ -36,7 +36,19 @@ export function ignoreRelayText(requestId: string, text: string): boolean {
 // pbcopy/pbpaste 按 locale 解码；若环境没有 UTF-8 locale，中文会丢失，所以显式指定
 const PB_ENV = { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" };
 
+const isWin = process.platform === "win32";
+function ps(script: string, input?: string): Promise<string> {
+  return new Promise((resolve) => {
+    const child = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => resolve(err ? "" : stdout));
+    child.stdin?.end(input ?? "");
+  });
+}
 function pb(cmd: "pbcopy" | "pbpaste", input?: string): Promise<string> {
+  if (isWin) {
+    // Windows：通过 PowerShell 读写剪贴板（UTF-8）
+    if (cmd === "pbcopy") return ps("[Console]::InputEncoding=[Text.Encoding]::UTF8; $t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t", input);
+    return ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw").then((t) => t.replace(/\r\n/g, "\n"));
+  }
   return new Promise((resolve) => {
     const child = execFile(cmd, [], { maxBuffer: 16 * 1024 * 1024, env: PB_ENV }, (err, stdout) => resolve(err ? "" : stdout));
     if (cmd === "pbcopy") child.stdin?.end(input ?? "");
@@ -44,7 +56,7 @@ function pb(cmd: "pbcopy" | "pbpaste", input?: string): Promise<string> {
 }
 
 export function clipboardAvailable(): boolean {
-  return process.platform === "darwin";
+  return process.platform === "darwin" || isWin;
 }
 
 function osascript(script: string): Promise<string> {
@@ -53,10 +65,15 @@ function osascript(script: string): Promise<string> {
 
 /** 当前正在运行的、有窗口的应用名（供用户选择目标应用） */
 export async function listRunningApps(): Promise<string[]> {
+  if (isWin) {
+    const out = await ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty ProcessName -Unique");
+    const skip = new Set(["explorer", "powershell", "cmd", "WindowsTerminal", "PeerGrading", "electron"]);
+    return out.split(/\r?\n/).map((n) => n.trim()).filter((n) => n && !skip.has(n)).sort((a, b) => a.localeCompare(b));
+  }
   if (!clipboardAvailable()) return [];
   const out = await osascript('tell application "System Events" to get name of every process whose background only is false');
   const names = out.split(", ").map((n) => n.trim()).filter(Boolean);
-  const skip = new Set(["Finder", "Terminal", "iTerm2", "node", "System Events", "Dock", "Electron"]);
+  const skip = new Set(["Finder", "Terminal", "iTerm2", "node", "System Events", "Dock", "Electron", "PeerGrading"]);
   return [...new Set(names.filter((n) => !skip.has(n)))].sort((a, b) => a.localeCompare(b));
 }
 
@@ -64,7 +81,11 @@ export async function listRunningApps(): Promise<string[]> {
 export async function sendToApp(text: string, app?: string): Promise<{ ok: boolean; message: string }> {
   await pb("pbcopy", text);
   if (!app) return { ok: true, message: "copied" };
-  const safe = app.replace(/"/g, "");
+  const safe = app.replace(/["']/g, "");
+  if (isWin) {
+    const r = await ps(`$p = Get-Process -Name '${safe.replace(/\.exe$/i, "")}' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1; if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null; 'activated' } else { 'not running' }`);
+    return { ok: true, message: r.trim() || "activated" };
+  }
   const r = await osascript(`tell application "${safe}" to activate`);
   return { ok: true, message: r === "" ? "activated" : r };
 }
@@ -132,7 +153,12 @@ export class RelayBackend implements Backend {
 
 /** 在 Terminal.app 新窗口里运行一条命令并把终端切到前台（用于一次性登录） */
 export async function runInTerminal(command: string): Promise<{ ok: boolean; message: string }> {
-  if (!clipboardAvailable()) return { ok: false, message: "only supported on macOS" };
+  if (isWin) {
+    // 新开一个命令行窗口执行登录命令
+    await ps(`Start-Process cmd.exe -ArgumentList '/k ${command.replace(/'/g, "''")}'`);
+    return { ok: true, message: "opened" };
+  }
+  if (process.platform !== "darwin") return { ok: false, message: "only supported on macOS / Windows" };
   const escaped = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const r = await osascript(`tell application "Terminal"\nactivate\ndo script "${escaped}"\nend tell`);
   return { ok: true, message: r };

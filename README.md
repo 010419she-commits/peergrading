@@ -125,6 +125,7 @@ npm run dist:mac              # 生成 release/PeerGrading-*.dmg（未签名；�
 npm run dist:win              # Windows 安装包（需在 Windows 或配好交叉打包环境）
 ```
 
+- Windows 版：在 macOS 上直接 `npm run dist:win` 即可产出 `release/PeerGrading Setup <版本>.exe`（NSIS 安装包，含 x64 与 arm64）。Windows 上剪贴板与切换应用通过 PowerShell 实现，命令行 agent 的 `.cmd` 包装脚本经 shell 启动；收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
 - 桌面模式由环境变量 `LOCAL_MODE=1` 开启（Electron 自动设置），数据放在系统的应用数据目录；`CLOUD_URL` 指向云端（默认 `https://peergrading.ai`）。
 - Electron 44 自带 Node 24，直接运行 `dist/server.mjs`（esbuild 打包的同一份服务）。
 - 云端接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（网页确认）、`GET /api/device/me`、`POST /api/device/usage`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。

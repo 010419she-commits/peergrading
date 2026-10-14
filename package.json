@@ -14,7 +14,8 @@
     "desktop": "npm run bundle && ELECTRON_RUN_AS_NODE= electron .",
     "desktop:local-cloud": "npm run bundle && CLOUD_URL=http://localhost:3001 electron .",
     "dist:mac": "npm run bundle && electron-builder --mac",
-    "dist:win": "npm run bundle && electron-builder --win"
+    "dist:win": "npm run bundle && electron-builder --win --x64 --arm64",
+    "dist:all": "npm run bundle && electron-builder --mac --win --x64 --arm64"
   },
   "engines": {
     "node": ">=24"
