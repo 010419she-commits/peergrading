@@ -1,0 +1,13 @@
+# 服务器上：docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=3000
+    volumes:
+      - ./data:/app/data           # SQLite：用户、会话、订单
+      - ./sessions:/app/sessions   # 协作记录、冻结版本、收尾报告
+    ports:
+      - "127.0.0.1:3000:3000"      # 只对本机开放，由 Caddy 对外提供 HTTPS

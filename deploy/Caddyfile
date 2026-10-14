@@ -1,0 +1,10 @@
+# /etc/caddy/Caddyfile — 自动申请并续期 HTTPS 证书，反代到 Node
+peergrading.ai {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000 {
+        flush_interval -1        # SSE 实时推送不要缓冲
+    }
+}
+www.peergrading.ai {
+    redir https://peergrading.ai{uri} permanent
+}

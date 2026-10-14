@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex">
+<title>工作台 · 双 Agent 协作循环</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="/i18n.js"></script>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <a class="brand-mini" href="/"><span class="brand-name" data-i18n="appTitle"></span></a>
+    <span class="sub" data-i18n="subtitle"></span>
+    <div class="right">
+      <span class="access" id="access-badge"></span>
+      <a class="tb-link" href="/account" data-i18n="accountLink"></a>
+      <button class="tb-link" id="logout-btn" type="button" data-i18n="logoutLink"></button>
+      <div class="seg" id="lang-seg"><button data-lang="zh">中文</button><button data-lang="en">English</button></div>
+    </div>
+  </div>
+  <div class="content">
+    <aside class="sidebar">
+      <div class="group" data-i18n="task"></div>
+      <textarea id="task" rows="6" data-i18n-ph="taskPh"></textarea>
+      <div class="group" data-i18n="agents"></div>
+      <div class="slot A" data-slot="A">
+        <h3 data-i18n="slotA"></h3>
+        <div class="pick" id="pick-A"></div>
+        <label data-i18n="name"></label><input id="name-A" value="Agent A">
+        <label data-i18n="persona"></label><textarea id="persona-A" rows="2" data-i18n-ph="personaPhA"></textarea>
+        <div class="effort-row" id="effort-row-A" hidden><label data-i18n="effort"></label><select id="effort-A"></select></div>
+        <div class="app-row" id="app-row-A" hidden><label data-i18n="targetApp"></label><input id="app-A" list="apps" data-i18n-ph="targetAppPh"></div>
+      </div>
+      <div class="slot B" data-slot="B">
+        <h3 data-i18n="slotB"></h3>
+        <div class="pick" id="pick-B"></div>
+        <label data-i18n="name"></label><input id="name-B" value="Agent B">
+        <label data-i18n="persona"></label><textarea id="persona-B" rows="2" data-i18n-ph="personaPhB"></textarea>
+        <div class="effort-row" id="effort-row-B" hidden><label data-i18n="effort"></label><select id="effort-B"></select></div>
+        <div class="app-row" id="app-row-B" hidden><label data-i18n="targetApp"></label><input id="app-B" list="apps" data-i18n-ph="targetAppPh"></div>
+      </div>
+      <div class="group" data-i18n="settings"></div>
+      <div class="row">
+        <div><label data-i18n="rounds"></label><input id="rounds" type="number" min="1" max="10" value="3"></div>
+        <div><label data-i18n="turns"></label><input id="turns" type="number" min="1" max="3" value="1"></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="start" data-i18n="start"></button>
+        <button class="btn" id="stop" data-i18n="stop" disabled></button>
+      </div>
+      <div id="status"></div>
+      <div class="group" data-i18n="history"></div>
+      <select id="history"></select>
+    </aside>
+    <section class="main" id="timeline"></section>
+    <aside class="inspector">
+      <div class="group" data-i18n="versions"></div>
+      <div class="final" id="final"></div>
+      <div class="tabs" id="tabs"></div>
+      <div class="body" id="version-body"></div>
+      <div class="finalizer" id="finalizer" hidden>
+        <div class="group" data-i18n="finTitle"></div>
+        <p class="hint" data-i18n="finHint"></p>
+        <label data-i18n="finAgent"></label><select id="fin-agent"></select>
+        <div class="row">
+          <div><label data-i18n="finSandbox"></label><select id="fin-sandbox"></select></div>
+          <div><label data-i18n="finFix"></label><input id="fin-fix" type="number" min="0" max="3" value="0"></div>
+        </div>
+        <label class="check" id="fin-pull-row"><input type="checkbox" id="fin-pull"> <span data-i18n="finPull"></span></label>
+        <p class="hint warn" id="fin-warn"></p>
+        <div class="actions"><button class="btn primary" id="fin-run"></button><button class="btn" id="fin-stop" data-i18n="finStop" disabled></button></div>
+        <div class="fin-log" id="fin-log"></div>
+        <div class="fin-result" id="fin-result"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<datalist id="apps"></datalist>
+<div class="sheet-bg" id="sheet"><div class="sheet">
+  <header><h2 data-i18n="pickerTitle"></h2><button class="btn sm" id="refresh" data-i18n="refresh"></button><button class="btn sm" id="close-sheet">✕</button></header>
+  <div class="hint" data-i18n="pickerHint"></div>
+  <div class="cards" id="cards"></div>
+</div></div>
+<div class="sheet-bg" id="paywall"><div class="sheet small">
+  <header><h2 data-i18n="paywallTitle"></h2><button class="btn sm" id="close-paywall">✕</button></header>
+  <div class="hint" id="paywall-text"></div>
+  <div class="hint"><a class="btn primary" href="/account#pricing" data-i18n="paywallBtn"></a></div>
+</div></div>
+<script src="/app.js"></script>
+</body>
+</html>

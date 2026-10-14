@@ -1,0 +1,138 @@
+# 双 Agent 协作循环 · Dual-Agent Loop
+
+两个 AI 智能体轮流担任**作者**与**审查者**：A 完成第 1 版 → B 审查并与 A 讨论 → B 修改出第 2 版 → A 审查…… 直到审查者判定「通过」。网页自动识别你电脑上的 agent（Claude Code、Codex、Qwen Code、Kimi Code 等），一键选两个开始。
+
+本版按三份评审稿重建：功能与账号体系按《网站微信 / Google 登录接入、会费制基础与视觉改造 · v9》，视觉按《品牌网站 · 视觉方向 A 样稿（第 4 版）》（深色 · 暖白 · 浅金），成果验证按《第 4 版：在成果版本后增加收尾 Agent》。前两份原稿在 `docs/`。
+
+## 运行
+
+需要 Node.js ≥ 24（直接运行 TypeScript，无需编译；SQLite 使用 Node 内置模块）。
+
+```bash
+npm install
+npm run dev      # 本地开发：启用“开发者登录”，打开 http://localhost:3000
+```
+
+```bash
+npm start        # 正式运行：需要 .env（见 .env.example）
+```
+
+## 站点结构
+
+| 路径 | 说明 |
+|---|---|
+| `/` | 首页：理念 / 接入方式 / 流程 / 定价，登录弹窗 |
+| `/app` | 工作台（必须登录，且在试用期内或已购买） |
+| `/account` | 账号：使用权、订单、购买、关联 / 解绑 / 重新验证登录方式 |
+| `/login` | 无 JS 也可用的登录页 |
+| `/terms` `/privacy` | 占位页，正式发布前替换 |
+
+## 登录与账号（v9 规格）
+
+- 微信（开放平台扫码 / 公众号内登录）与 Google 登录；首次登录自动建账号。
+- 浏览器认证版本 `auth_epoch`、一次性认证事务、服务端会话（HttpOnly Cookie）、与会话绑定的 CSRF 令牌、返回位置白名单。
+- 账号页支持切换账号、重新验证、绑定 / 解绑（解绑微信整组移除），至少保留一种登录方式。
+- 本地开发可用 `DEV_LOGIN=1` 启用“开发者登录”，不需要任何第三方凭证即可走通全部流程；生产环境该入口不存在。
+
+平台申请步骤见 `docs/final-v9-login-membership.md` §8。
+
+## 试用与买断
+
+- 注册后 **3 天内可免费使用 5 次**协作（先到者为准），之后需购买；`TRIAL_DAYS` / `TRIAL_USES` 可改。
+- 默认 **18.8 元一次买断**（永久权益）；`PLAN_MODE=days` + `PLAN_DAYS=30` 即改为按期会员。
+- 权益模型按 v9 §5.10 / §6：区间、永久、幂等授予、撤销。
+
+### 收款怎么接
+
+订单、支付事件、权益发放已按 v9 §6.4 实现（单事务、幂等、验签），支付渠道本身需要商户资质，留了三种接法：
+
+1. **线下 / 扫码收款**：在 `.env` 配 `PAY_INSTRUCTIONS` 与 `PAY_QR_URL`，用户下单后看到订单号与收款码；你确认到账后执行 `npm run confirm-order -- <订单号>`，会员立即生效。
+2. **支付回调**：`POST /api/payments/webhook`，raw body 用 `PAYMENT_WEBHOOK_SECRET` 做 HMAC-SHA256，签名放 `x-signature` 头；body 为 `{event_id, merchant_order_no, amount_cents, currency, provider_txn_id, provider}`。接微信支付 / 支付宝时把它们的验签逻辑替换进 `billing/orders.ts` 的 `verifyWebhookSignature`。
+3. **本地模拟**：`npm run dev` 下订单面板有“模拟支付成功”按钮，用于验证整条链路。
+
+运维脚本：`npm run users`（用户与权益）、`npm run grant -- <userId> member <days|permanent>`（手动发权益）。
+
+## 自动识别规则（以 agent 为单位）
+
+| agent | 识别方式 | 接入方式 | 需要的准备 |
+|---|---|---|---|
+| Claude Code | PATH 上的 `claude`，或 Claude 桌面版内置的命令行 | 命令行直连 | 一次性登录：卡片上点「打开终端登录」，会带上系统代理运行 `claude auth login`，浏览器里点一次授权即可 |
+| Codex | PATH 上的 `codex`，或 ChatGPT 桌面版内置的 codex-cli | 命令行直连 | 在 ChatGPT 应用的 Codex 里登录即可 |
+| Qwen Code | PATH 上的 `qwen` | 命令行直连 | 终端运行 `qwen` 完成一次登录 |
+| Kimi Code | 环境变量 `KIMI_API_KEY`（或 `MOONSHOT_API_KEY`） | Kimi 开放平台接口直连 | 已有 key 即可；可用 `KIMI_MODEL` 指定模型 |
+| Gemini CLI、Kimi Code CLI、OpenCode、Cursor Agent、Copilot CLI、Amp、Droid、Crush、Goose、auggie、iFlow、CodeBuddy、Aider | PATH 上的可执行文件 | 命令行直连（实验性） | 自行登录 |
+| Kimi Code、Kimi、Claude 桌面版、ChatGPT/Codex 桌面版、Qwen Code 桌面版、Cursor、Windsurf、Trae、Kiro、Qoder、CodeBuddy、Antigravity、Zed、VS Code | `/Applications` 里的 .app | 剪贴板中转（预设目标应用，一键发送即切到前台） | 应用里登录即可 |
+| 剪贴板中转 / 手动中转（不指定应用） | 始终可用 | 中转 | 无 |
+
+选择器分「一键全自动」与「需要手动粘贴」两组；默认只扫描 agent，`SCAN_MODELS=1` 时额外列出 LM Studio / Ollama 本地模型与 `ANTHROPIC_API_KEY` 直连。
+
+**网络代理**：国内直连 Anthropic / OpenAI 会被拒绝（403）。程序自动读取 macOS 系统代理（或 `HTTPS_PROXY`），在调用 Claude Code、Codex 命令行及「打开终端登录」时带上；Kimi 等国内接口不走代理。
+
+## 中转模式（不装 CLI、不登录）
+
+1. 选桌面应用卡片（或「剪贴板中转」并填目标应用）。
+2. 轮到它时点「发送到 ××」：内容已复制并切到该应用，⌘V 回车；第一条消息请在应用里新建对话再贴。
+3. 复制整段回答。网页检测到剪贴板新内容后显示预览与 6 秒倒计时，可确认或拒绝；也可把回答粘贴到卡片里提交。
+
+## 收尾 Agent（把成果真正跑起来）
+
+协作结束后，右侧版本面板下方出现「收尾 Agent」：选一个全自动 agent（命令行或接口直连）作为收尾模型，选执行环境，点「运行第 N 版」。流程与原稿一致：
+
+```
+冻结选定版本 → 识别代码围栏并布局成文件（带 title= 的直接用；匿名块由 Agent 决定）
+→ 探测环境（node / python3 / cargo / go / java 版本）→ Agent 生成运行计划（只允许新增辅助文件）
+→ 安装 / 构建 → 实际运行 → 机器检查（stdout / JSON 字段 / 产物文件）+ Agent 判定
+→ 可选修复（0–3 次，只处理依赖、入口、路径、明显语法错误）→ 清理 → 报告
+```
+
+- **执行环境**：有 Docker 时默认 Docker（每条命令独立容器，根目录只读，运行阶段禁网，限制内存 / CPU / 进程数）；没有 Docker 时只能「本机直接运行」，页面会提示无隔离。
+- **成功的条件**：至少一条运行命令真实执行、安装与运行均成功、所有检查通过且至少一条是实质性检查、Agent 判定 success、本次尝试没有未批准的源码变化。否则为失败 / 未确认。
+- **版本冻结**：每次协作结束时，各版本按「轮次 + 作者 + SHA-256」冻结在 `sessions/<会话>/versions/`；收尾只针对冻结记录，不用当前工作区冒充历史。
+- **报告**：`sessions/<会话>/finalizer/<运行 ID>/report.md`（含完整命令输出、检查结果、批准的辅助文件与运行期实际差异），页面上可直接打开。
+- 对原稿的两处适配：原稿是命令行交互（`[F]/[N]` 提示、`--finalize-*` 参数），这里改成页面按钮与选项；模型回复的 JSON 结构不合规时会把校验错误反馈给模型最多重试两次，宿主校验本身不放宽。
+- 作者 / 审查者的提示词已按原稿建议补充：代码围栏标注 `title=<相对路径>`，示例 / 旧代码 / 输出标注 `role=example|old|output`。
+
+## 工作台
+
+- 为 A、B 选 agent、设名称与人设；设最大审查轮数与每轮讨论次数；随时停止。
+- 左侧时间线实时流式显示全部发言，等待时显示已等待秒数与模型推理进度；右侧是各版本成果，结束后定位最终版。
+- 会话按用户保存在 `sessions/<时间>/session.json`，可回放。
+
+## 文件
+
+- `server.ts` — Express 服务：静态站点、登录、账号、付费、受保护的协作接口
+- `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`
+- `billing/` — 试用与使用权、订单与支付事件处理、定价 / 下单 / 回调接口
+- `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）
+- `finalizer/` — 收尾 Agent：`types` `extract`（围栏识别与布局）`validate`（计划校验、路径与文件快照、机器检查）`executor`（Docker / 宿主执行）`service`（版本冻结、主流程、报告）`agent`（接入项目 agent）
+- `orchestrator.ts` — 协作循环与中英文提示词
+- `public/` — 首页 `index.html` + `site.css` + `site.js` + `site-i18n.js`；账号页；工作台脚本 `app.js` / `style.css` / `i18n.js`
+- `views/app.html` — 工作台页面（仅经鉴权路由返回）
+- `scripts/` — `grant-entitlement` `confirm-order` `list-users`
+- `docs/` — 两份评审稿原文
+
+## 部署到 peergrading.ai
+
+网站需要常驻进程、本地 SQLite 与文件目录，还要能启动子进程，所以用一台 VPS（不能用 Vercel 这类无服务器平台）。`.ai` 域名无法做 ICP 备案，服务器放在香港 / 新加坡 / 美国即可直接绑定域名；代价是大陆访问稍慢，申请微信登录时审核方也可能要求备案，申请前先确认。
+
+云端能用的 agent 只有接口直连（Kimi、以及你自己 key 的 Claude / OpenAI API）和手动中转；剪贴板中转、桌面应用、服务器上登录的个人 CLI 账号都不适合公开服务。
+
+**第一次部署**
+
+1. 把代码推到 GitHub（仓库名 `dual-agent-review-loop`）。
+2. 域名 DNS：`peergrading.ai` 与 `www` 各加一条 A 记录指向服务器 IP。
+3. 在服务器上执行一次 `deploy/setup-server.sh <你的GitHub用户名>`：装 Docker 与 Caddy，拉代码，生成 `.env` 骨架并把 Caddy 配成自动 HTTPS。
+4. 编辑服务器上的 `/srv/peergrading/.env`：`BASE_URL=https://peergrading.ai`、`SESSION_SECRET`（脚本已生成）、至少一个登录渠道（Google 最快，`GOOGLE_CLIENT_ID/SECRET`，回调填 `https://peergrading.ai/auth/google/callback`）、`KIMI_API_KEY`、收款信息。
+5. 运行 `deploy/deploy.sh`，访问 https://peergrading.ai。
+
+**之后每次修改**
+
+本地改好并用 `npm run dev` 验证 → `git push` → 服务器自动更新（已提供 GitHub Actions：在仓库 Secrets 里填 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`）。不想用 Actions 就 SSH 到服务器执行 `deploy/deploy.sh`。数据在 `data/` 与 `sessions/` 两个挂载目录里，重新部署不会丢。
+
+文件：`Dockerfile`、`docker-compose.yml`、`deploy/Caddyfile`、`deploy/setup-server.sh`、`deploy/deploy.sh`、`.github/workflows/deploy.yml`。
+
+## 上线前清单
+
+- 填好 `.env`：`BASE_URL`（https）、`SESSION_SECRET`、至少一个登录渠道；`NODE_ENV=production`。
+- Nginx 反代并传递 `X-Forwarded-Proto`；`data/` 定期备份。
+- 替换 `/terms`、`/privacy` 占位内容；按 v9 §9 验收清单逐项测试已配置的渠道。

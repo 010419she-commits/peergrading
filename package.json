@@ -1,0 +1,23 @@
+{
+  "name": "dual-agent-review-loop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "两个 Claude Agent 互相审查、讨论、修改的协作循环（网页版）",
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env server.ts",
+    "dev": "DEV_LOGIN=1 node --no-warnings=ExperimentalWarning --env-file-if-exists=.env server.ts",
+    "grant": "node --no-warnings=ExperimentalWarning scripts/grant-entitlement.ts",
+    "confirm-order": "node --no-warnings=ExperimentalWarning scripts/confirm-order.ts",
+    "users": "node --no-warnings=ExperimentalWarning scripts/list-users.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "google-auth-library": "^9.15.1"
+  }
+}

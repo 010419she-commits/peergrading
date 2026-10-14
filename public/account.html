@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex">
+  <title>账号 · 双 Agent 协作循环</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500&display=swap">
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <header class="site-header"><div class="wrap header-inner">
+    <a class="brand" href="/"><span class="brand-name" data-i18n="brand">双 Agent 协作循环</span><span class="brand-caption">Dual-Agent Loop</span></a>
+    <nav class="primary-nav" aria-label="主导航"><a href="/#pricing" data-i18n="navPricing">定价</a><a href="/app" data-i18n="openApp">进入工作台</a></nav>
+    <div class="header-right"><div class="nav-auth" id="nav-auth"></div><div class="lang-seg"><button type="button" data-lang="zh">中文</button><button type="button" data-lang="en">EN</button></div></div>
+  </div></header>
+  <main id="main">
+    <section class="section narrow">
+      <p class="eyebrow" data-i18n="account">账号</p>
+      <h2 data-i18n="accountTitle">账号与会员</h2>
+      <div id="account-root" class="account"><p class="muted" data-i18n="loading">加载中…</p></div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="wrap"><div>© <span id="year"></span> <span data-i18n="brand">双 Agent 协作循环</span></div><nav><a href="/privacy" data-i18n="privacy">隐私政策</a><a href="/terms" data-i18n="terms">服务条款</a></nav></div></footer>
+  <dialog class="modal" id="login-modal" aria-labelledby="login-title"><div class="modal-panel">
+    <button class="modal-close" type="button" data-close aria-label="关闭">×</button>
+    <p class="eyebrow" id="login-eyebrow">欢迎</p><h2 id="login-title" style="font-size:28px">登录</h2><p class="muted" id="login-desc"></p>
+    <div class="login-buttons" id="login-buttons"></div>
+  </div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/site-i18n.js"></script><script src="/site.js"></script>
+</body>
+</html>
