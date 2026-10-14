@@ -61,7 +61,7 @@ if (localMode) {
   app.get("/api/download/latest", (_req, res) => {
     const files = fs.existsSync(DOWNLOADS) ? fs.readdirSync(DOWNLOADS).filter((f) => /\.(dmg|exe|zip|AppImage)$/i.test(f)) : [];
     const pick = (re: RegExp) => files.filter((f) => re.test(f)).map((f) => { const st = fs.statSync(path.join(DOWNLOADS, f)); const v = f.match(/(\d+\.\d+\.\d+)/)?.[1] ?? ""; return { file: f, url: `/download/${encodeURIComponent(f)}`, size: st.size, version: v, mtime: st.mtimeMs }; }).sort((a, b) => b.mtime - a.mtime)[0] ?? null;
-    res.json({ mac: pick(/\.dmg$/i), win: pick(/\.exe$/i) });
+    res.json({ macArm: pick(/-arm64\.dmg$/i), macIntel: pick(/^(?!.*arm64).*\.dmg$/i), mac: pick(/-arm64\.dmg$/i) ?? pick(/\.dmg$/i), win: pick(/\.exe$/i) });
   });
   /* ---------- 网页版工作台（需登录 + 试用/会员；生产默认关闭） ---------- */
   app.get("/app", (req, res, next) => (config.webWorkspace ? next() : res.redirect("/#download")), requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));

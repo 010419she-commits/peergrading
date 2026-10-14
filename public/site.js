@@ -139,13 +139,17 @@
     const box = $("#downloads"); if (!box) return;
     let d = null; try { d = await (await fetch("/api/download/latest")).json(); } catch {}
     const mb = (n) => (n / 1048576).toFixed(0) + " MB";
-    const card = (title, sub, item, soon) => {
-      const c = el("div", { className: "plan" + (item ? " featured" : "") }, el("h3", { textContent: title }), el("p", { className: "muted", textContent: sub }));
-      if (item) { c.append(el("a", { className: "button button-primary", href: item.url, textContent: t("downloadBtn")(item.version) }), el("p", { className: "fine", textContent: `${item.file} · ${mb(item.size)}` })); }
-      else c.append(el("span", { className: "badge soft", textContent: soon }));
+    const card = (title, sub, items, soon) => {
+      const c = el("div", { className: "plan" + (items.some(Boolean) ? " featured" : "") }, el("h3", { textContent: title }), el("p", { className: "muted", textContent: sub }));
+      let any = false;
+      for (const [label, item] of items) {
+        if (!item) continue; any = true;
+        c.append(el("a", { className: "button button-primary", href: item.url, textContent: `${t("downloadBtn")(item.version)}${label ? " · " + label : ""}` }), el("p", { className: "fine", textContent: `${item.file} · ${mb(item.size)}` }));
+      }
+      if (!any) c.append(el("span", { className: "badge soft", textContent: soon }));
       return c;
     };
-    box.replaceChildren(card(t("dlMac"), t("dlMacSub"), d?.mac, t("dlSoon")), card(t("dlWin"), t("dlWinSub"), d?.win, t("dlSoon")));
+    box.replaceChildren(card(t("dlMac"), t("dlMacSub"), [[t("dlApple"), d?.macArm], [t("dlIntel"), d?.macIntel]], t("dlSoon")), card(t("dlWin"), t("dlWinSub"), [["", d?.win]], t("dlSoon")));
   }
   renderDownloads();
   function planLines() {
