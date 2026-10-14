@@ -13,7 +13,7 @@ import { auth, account } from "./auth/routes.ts";
 import { cleanupTx } from "./auth/tx.ts";
 import { billing, paymentWebhook } from "./billing/routes.ts";
 import { device, cleanupDeviceCodes } from "./auth/device.ts";
-import { localMode, local, isPaired, cachedUser, reportUsage, cloudUrl } from "./auth/localmode.ts";
+import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor } from "./agents/detect.ts";
@@ -47,7 +47,7 @@ if (localMode) {
   app.get("/", (_req, res) => res.redirect(isPaired() ? "/app" : "/pair"));
   app.get("/pair", (_req, res) => res.sendFile(path.join(here, "views", "pair.html")));
   app.get("/app", (_req, res) => isPaired() ? res.sendFile(path.join(here, "views", "app.html")) : res.redirect("/pair"));
-  app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${cloudUrl}/account`));
+  app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${getCloudUrl()}/account`));
 } else {
   app.use(attachUser);
   app.use(["/api", "/auth", "/login", "/app", "/account", "/device"], noStore);
@@ -254,7 +254,7 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 
 setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
 app.listen(config.port, HOST, () => {
-  console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${cloudUrl}, paired=${isPaired()})`
+  console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${getCloudUrl()}, paired=${isPaired()})`
     : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${!!config.wechat.open.appId})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

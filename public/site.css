@@ -240,3 +240,4 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 .header-inner .primary-nav { gap: 4px 20px; }
 .nav-auth { flex-wrap: nowrap; }
 .nav-auth .text-link { min-height: 36px; font-size: 14px; }
+@media (max-width: 1279px) { .nav-auth .user-name, .nav-auth .badge { display: none; } }

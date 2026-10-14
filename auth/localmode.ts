@@ -9,8 +9,17 @@ import { issueCsrf, requireCsrf } from "./security.ts";
 import { requireBrowser } from "./middleware.ts";
 
 export const localMode = process.env.LOCAL_MODE === "1";
-export const cloudUrl = (process.env.CLOUD_URL || "https://peergrading.ai").replace(/\/$/, "");
-const stateFile = path.join(path.dirname(config.dbPath), "device.json");
+const dataDir = path.dirname(config.dbPath);
+const stateFile = path.join(dataDir, "device.json");
+const cloudFile = path.join(dataDir, "cloud.json");
+const DEFAULT_CLOUD = (process.env.CLOUD_URL || "https://peergrading.ai").replace(/\/$/, "");
+let cloudOverride: string | null = (() => { try { return JSON.parse(fs.readFileSync(cloudFile, "utf8")).url || null; } catch { return null; } })();
+/** 云端地址：默认 peergrading.ai，可在配对页改（例如本机开发用的 http://localhost:3001） */
+export const getCloudUrl = () => (cloudOverride || DEFAULT_CLOUD).replace(/\/$/, "");
+export function setCloudUrl(url: string | null) {
+  cloudOverride = url && /^https?:\/\/[\w.-]+(:\d+)?$/.test(url.trim()) ? url.trim().replace(/\/$/, "") : null;
+  if (cloudOverride) fs.writeFileSync(cloudFile, JSON.stringify({ url: cloudOverride }), { mode: 0o600 }); else try { fs.unlinkSync(cloudFile); } catch {}
+}
 const REFRESH_MS = 10 * 60 * 1000;
 const OFFLINE_GRACE_MS = 72 * 3600 * 1000;
 
@@ -22,7 +31,7 @@ const save = () => { if (state) fs.writeFileSync(stateFile, JSON.stringify(state
 const deviceName = () => `${os.hostname()} (${os.platform() === "darwin" ? "macOS" : os.platform()})`;
 
 async function cloud(pathname: string, init: RequestInit = {}) {
-  const r = await fetch(cloudUrl + pathname, { ...init, headers: { "content-type": "application/json", ...(init.headers || {}) }, signal: AbortSignal.timeout(15000) });
+  const r = await fetch(getCloudUrl() + pathname, { ...init, headers: { "content-type": "application/json", ...(init.headers || {}) }, signal: AbortSignal.timeout(15000) });
   const body: any = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, body };
 }
@@ -57,7 +66,7 @@ export async function refreshMe(force = false): Promise<void> {
     const r = await cloud("/api/device/me", { headers: { authorization: `Bearer ${state.token}` } });
     if (r.status === 401) { unpair(); lastError = "设备已被断开或账号不可用，请重新配对"; return; }
     if (r.ok) { state.user = r.body.user; state.plan = r.body.plan; state.fetchedAt = Date.now(); save(); lastError = ""; }
-  } catch (e: any) { lastError = `无法连接 ${cloudUrl}：${e?.message ?? e}`; }
+  } catch (e: any) { lastError = `无法连接 ${getCloudUrl()}：${e?.message ?? e}`; }
 }
 /** 供中间件使用的用户对象（与云端 users 行形状兼容） */
 export function cachedUser(): any | null {
@@ -93,7 +102,7 @@ local.get("/api/auth/bootstrap", async (req, res) => {
   await refreshMe();
   const u = cachedUser();
   res.json({
-    status: u ? "authenticated" : "anonymous", localMode: true, cloudUrl, paired: isPaired(), lastError,
+    status: u ? "authenticated" : "anonymous", localMode: true, cloudUrl: getCloudUrl(), cloudDefault: DEFAULT_CLOUD, paired: isPaired(), lastError,
     user: u ? { id: u.id, name: u.display_name, avatar: u.avatar_url, createdAt: u.created_at, access: u.access, entitlements: u.entitlements } : null,
     providers: {}, plan: state?.plan ?? null,
     csrf: issueCsrf({ bidHash: r.bidHash, sessionId: null, authEpoch: r.authEpoch }),
@@ -107,3 +116,10 @@ local.get("/api/local/pair/status", async (_req, res) => {
   res.json({ status, paired: isPaired(), userCode: pending?.userCode ?? null });
 });
 local.post("/api/local/unpair", requireBrowser, requireCsrf, (_req, res) => { unpair(); res.json({ ok: true }); });
+/** 高级：改云端地址（未配对时才允许） */
+local.post("/api/local/cloud", requireBrowser, requireCsrf, (req, res) => {
+  if (isPaired()) return res.status(409).json({ error: "paired" });
+  setCloudUrl(req.body?.url ? String(req.body.url) : null);
+  pending = null;
+  res.json({ ok: true, cloudUrl: getCloudUrl() });
+});

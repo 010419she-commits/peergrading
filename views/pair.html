@@ -29,6 +29,10 @@
         </div>
       </div>
       <p class="fine">没有账号？在浏览器里登录时会自动创建，并立即获得免费试用。</p>
+      <details style="margin-top:28px"><summary class="muted" style="cursor:pointer;font-size:13px">高级：云端地址</summary>
+        <div class="ops" style="margin-top:12px"><input id="cloud-url" style="max-width:360px" placeholder="https://peergrading.ai"><button class="button small" id="cloud-save" type="button">保存</button><span class="muted" id="cloud-msg"></span></div>
+        <p class="fine">只在自建服务器或本机开发（例如 http://localhost:3001）时需要改；留空恢复默认。</p>
+      </details>
     </section>
   </main>
   <script>
@@ -38,6 +42,11 @@
       $("#cloud").textContent = boot.cloudUrl.replace(/^https?:\/\//, "");
       if (boot.paired && boot.user) return location.replace("/app");
       if (boot.lastError) $("#err").textContent = boot.lastError;
+      $("#cloud-url").value = boot.cloudUrl === boot.cloudDefault ? "" : boot.cloudUrl; $("#cloud-url").placeholder = boot.cloudDefault;
+      $("#cloud-save").onclick = async () => {
+        const r = await fetch("/api/local/cloud", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": boot.csrf }, body: JSON.stringify({ url: $("#cloud-url").value }) });
+        const d = await r.json(); $("#cloud-msg").textContent = r.ok ? "已保存：" + d.cloudUrl : (d.error || "失败"); if (r.ok) { $("#cloud").textContent = d.cloudUrl.replace(/^https?:\/\//, ""); $("#step-start").hidden = false; $("#start").disabled = false; $("#step-code").hidden = true; }
+      };
       let timer;
       $("#start").onclick = async () => {
         $("#start").disabled = true; $("#err").textContent = "";
