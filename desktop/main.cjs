@@ -27,6 +27,7 @@ async function start() {
   process.env.CLOUD_URL = process.env.CLOUD_URL || "https://peergrading.ai";
   process.env.PORT = String(await freePort());
   process.env.HOST = "127.0.0.1";
+  process.env.BASE_URL = `http://127.0.0.1:${process.env.PORT}`;   // 窗口打开的就是这个地址，CSRF 的同源判断以它为准
   await import(pathToFileURL(path.join(__dirname, "..", "dist", "server.mjs")).href);
   const base = `http://127.0.0.1:${process.env.PORT}`;
   await waitFor(`${base}/api/auth/bootstrap`);

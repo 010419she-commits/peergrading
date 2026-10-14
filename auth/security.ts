@@ -55,7 +55,13 @@ export function requireCsrf(req: Request, res: Response, next: NextFunction) {
     ? res.status(403).type("text").send("请求校验失败，请返回重试")
     : res.status(403).json({ error: code });
   const origin = req.get("origin");
-  if (origin ? origin !== config.siteOrigin : req.get("sec-fetch-site") !== "same-origin") return deny("bad_origin");
+  const originOk = (o: string) => {
+    if (o === config.siteOrigin) return true;
+    // 桌面模式：服务只监听本机回环地址，localhost / 127.0.0.1 / [::1] 同端口视为同源
+    if (process.env.LOCAL_MODE !== "1") return false;
+    try { const u = new URL(o); return ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) && Number(u.port || (u.protocol === "https:" ? 443 : 80)) === config.port; } catch { return false; }
+  };
+  if (origin ? !originOk(origin) : req.get("sec-fetch-site") !== "same-origin") return deny("bad_origin");
   const token = req.get("x-csrf-token") || (req.body as any)?._csrf;
   const r = req as any;
   if (!r.bidHash || !verifyCsrf(token, { bidHash: r.bidHash, sessionId: r.session?.id || null, authEpoch: r.authEpoch })) return deny("csrf");

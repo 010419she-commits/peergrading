@@ -31,7 +31,12 @@ const save = () => { if (state) fs.writeFileSync(stateFile, JSON.stringify(state
 const deviceName = () => `${os.hostname()} (${os.platform() === "darwin" ? "macOS" : os.platform()})`;
 
 async function cloud(pathname: string, init: RequestInit = {}) {
-  const r = await fetch(getCloudUrl() + pathname, { ...init, headers: { "content-type": "application/json", ...(init.headers || {}) }, signal: AbortSignal.timeout(15000) });
+  let r: Response;
+  try {
+    r = await fetch(getCloudUrl() + pathname, { ...init, headers: { "content-type": "application/json", ...(init.headers || {}) }, signal: AbortSignal.timeout(15000) });
+  } catch (e: any) {
+    throw new Error(`无法连接云端 ${getCloudUrl()}（${e?.cause?.code || e?.name || "网络错误"}）。网站尚未部署或网络不通；本机开发可在「高级：云端地址」填 http://localhost:3001`);
+  }
   const body: any = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, body };
 }
@@ -40,7 +45,7 @@ export const isPaired = () => !!state?.token;
 
 export async function startPairing() {
   const r = await cloud("/api/device/start", { method: "POST", body: JSON.stringify({ deviceName: deviceName() }) });
-  if (!r.ok) throw new Error(`云端不可用（${r.status}）`);
+  if (!r.ok) throw new Error(`云端返回 ${r.status}：${r.body?.error || "不可用"}`);
   pending = { deviceCode: r.body.deviceCode, userCode: r.body.userCode, verificationUrl: r.body.verificationUrl, expiresAt: Date.now() + r.body.expiresIn * 1000 };
   return { userCode: pending.userCode, verificationUrl: pending.verificationUrl };
 }
