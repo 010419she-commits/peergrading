@@ -82,7 +82,6 @@
       f.lastChild.dataset.provider = provider; return f;
     };
     let any = false;
-    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); }
     if (p?.google?.available) { any = true; box.append(form("google", t("loginGoogle"))); if (p.google.hint) box.append(el("p", { className: "fine", textContent: p.google.hint })); }
     if (p?.dev?.available) { any = true; box.append(form("dev", t("loginDev"))); }
     if (!any) box.append(el("p", { className: "muted", textContent: t("noProviders") }));
@@ -171,7 +170,8 @@
       return;
     }
     const a = S.user.access;
-    if (buyBtn) { buyBtn.textContent = a.member ? t("alreadyMember") : t("buyNow"); buyBtn.disabled = a.member; buyBtn.onclick = () => startPurchase(); }
+    const renewable = p.mode === "days";
+    if (buyBtn) { buyBtn.textContent = a.member ? (renewable ? t("renew") : t("alreadyMember")) : t("buyNow"); buyBtn.disabled = a.member && !renewable; buyBtn.onclick = () => startPurchase(); }
     if (a.member) { box.classList.add("ok"); box.append(el("span", { textContent: memberText() })); }
     else if (a.trial.active) box.append(el("span", { textContent: t("trialLeft")(a.trial.daysLeft, a.trial.usesLeft) }));
     else { box.classList.add("warn"); box.append(el("span", { textContent: t(a.reason === "trial_expired" ? "trialExpired" : "trialExhausted") })); }
@@ -223,7 +223,7 @@
     row(t("usedLabel"), String(a.trial.used));
     row(t("sinceLabel"), fmtDate(S.user.createdAt));
     root.append(el("h3", { textContent: t("accessTitle") }), kv);
-    if (!a.member) { const b = el("button", { className: "button button-primary", type: "button", textContent: t("buyNow") + " · " + planLines().price }); b.addEventListener("click", busy(b, startPurchase)); root.append(el("div", { className: "notice", id: "order-box" }, b)); }
+    if (!a.member || S.plan?.mode === "days") { const b = el("button", { className: "button button-primary", type: "button", textContent: (a.member ? t("renew") : t("buyNow")) + " · " + planLines().price }); b.addEventListener("click", busy(b, startPurchase)); root.append(el("div", { className: "notice", id: "order-box" }, b)); }
     // 订单
     fetch("/api/billing/status").then((r) => r.json()).then((d) => {
       if (!d.orders?.length) return;
@@ -235,32 +235,22 @@
       if (pending && !a.member) { const b = el("button", { className: "text-link", type: "button", textContent: t("continuePay") }); b.addEventListener("click", startPurchase); root.append(b); }
     }).catch(() => {});
     // 身份
-    const names = { google: "Google", wechat: t("wechat"), dev: t("devAccount") }, chan = { mp: t("chanMp"), open: t("chanQr") };
+    const names = { google: "Google", dev: t("devAccount") };
     const ids = S.user.identities, providersHeld = new Set(ids.map((i) => i.provider));
     const canRemove = ids.length > 1;
     const needVerify = () => toast(t("needVerify"), 6000);
     const list = el("ul", { className: "id-list" });
-    const wx = ids.filter((i) => i.provider === "wechat");
-    if (wx.length) {
-      const li = el("li", {}, el("span", { textContent: `${t("wechat")} · ${wx.map((i) => `${chan[i.channel] || ""}${i.display_name ? " " + i.display_name : ""}`).join(" / ")}` }));
-      const ops = el("div", { className: "ops" });
-      for (const i of wx) { const ok = S.providers.wechat.available && S.providers.wechat.mode === (i.channel === "mp" ? "mp" : "qr"); const b = el("button", { className: "text-link", type: "button", textContent: `${t("reverify")}（${chan[i.channel]}）`, disabled: !ok }); b.addEventListener("click", busy(b, () => reverify(i.id))); ops.append(b); }
-      if (canRemove) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbindWechat") }); b.addEventListener("click", busy(b, () => unbind({ provider: "wechat" }, t("confirmUnbindWechat")))); ops.append(b); }
-      li.append(ops); list.append(li);
-    }
-    for (const i of ids.filter((i) => i.provider !== "wechat")) {
+    for (const i of ids) {
       const li = el("li", {}, el("span", { textContent: `${names[i.provider] || i.provider}${i.display_name ? " · " + i.display_name : ""}` }));
       const ops = el("div", { className: "ops" });
-      const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers[i.provider]?.available }); rv.addEventListener("click", busy(rv, () => reverify(i.id))); ops.append(rv);
+      const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers?.[i.provider]?.available }); rv.addEventListener("click", busy(rv, () => reverify(i.id))); ops.append(rv);
       if (canRemove) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbind") }); b.addEventListener("click", busy(b, () => unbind({ identityId: i.id }, t("confirmUnbind")))); ops.append(b); }
       li.append(ops); list.append(li);
     }
     root.append(el("h3", { textContent: t("identitiesTitle") }), list);
     const bindRow = el("div", { className: "bind-row" });
-    for (const p of ["wechat", "google", "dev"]) {
-      if (!S.providers[p]?.available) continue;
-      if (p !== "wechat" && providersHeld.has(p)) continue;
-      if (p === "wechat" && wx.some((i) => i.channel === (S.providers.wechat.mode === "mp" ? "mp" : "open"))) continue;
+    for (const p of ["google", "dev"]) {
+      if (!S.providers?.[p]?.available || providersHeld.has(p)) continue;
       const b = el("button", { className: "button small", type: "button", textContent: t("bind") + names[p] });
       b.addEventListener("click", busy(b, async () => {
         if (!S.user.recentlyVerified) return needVerify();

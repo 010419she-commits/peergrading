@@ -30,10 +30,6 @@ export const config = {
   sessionSecret,
   dbPath: path.join(dataDir, "app.db"),
   google: { clientId: process.env.GOOGLE_CLIENT_ID || "", clientSecret: process.env.GOOGLE_CLIENT_SECRET || "" },
-  wechat: {
-    open: { appId: process.env.WECHAT_OPEN_APPID || "", secret: process.env.WECHAT_OPEN_SECRET || "", unionDomain: process.env.WECHAT_OPEN_UNION_DOMAIN || "" },
-    mp:   { appId: process.env.WECHAT_MP_APPID || "",   secret: process.env.WECHAT_MP_SECRET || "",   unionDomain: process.env.WECHAT_MP_UNION_DOMAIN || "" },
-  },
   /** 本地开发登录（无需任何第三方凭证）。仅当非生产 + BASE_URL 为 localhost + DEV_LOGIN=1 */
   devLogin: !isProd && isLocalBase && process.env.DEV_LOGIN === "1",
   /** 云端的网页版工作台（用服务器上的 agent）。产品主体是桌面软件，生产默认关闭 */
@@ -48,13 +44,13 @@ export const config = {
 
   /** 试用与定价（站主规则：3 天或 5 次试用，之后 18.8 元买断） */
   plan: {
-    code: process.env.PLAN_CODE || "buyout",
+    code: process.env.PLAN_CODE || "monthly",
     version: 1,
     name: process.env.PRODUCT_NAME || "PeerGrading",
     entitlement: "member",
-    mode: (process.env.PLAN_MODE === "days" ? "days" : "permanent") as "permanent" | "days",
+    mode: (process.env.PLAN_MODE === "permanent" ? "permanent" : "days") as "permanent" | "days",   // 默认月付；PLAN_MODE=permanent 改为买断
     days: Number(process.env.PLAN_DAYS || 30),
-    priceCents: Number(process.env.PRICE_CENTS || 1880),
+    priceCents: Number(process.env.PRICE_CENTS || 1800),
     currency: process.env.CURRENCY || "CNY",
     trialDays: Number(process.env.TRIAL_DAYS || 3),
     trialUses: Number(process.env.TRIAL_USES || 5),
@@ -68,5 +64,3 @@ export const config = {
 };
 
 export const googleReady = () => !!(config.google.clientId && config.google.clientSecret);
-export const wechatOpenReady = () => !!(config.wechat.open.appId && config.wechat.open.secret);
-export const wechatMpReady = () => !!(config.wechat.mp.appId && config.wechat.mp.secret);

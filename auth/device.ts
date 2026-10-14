@@ -19,8 +19,11 @@ device.post("/api/device/start", (req, res) => {
   const deviceCode = randomToken(32);
   let code = userCode();
   for (let i = 0; i < 5 && q("SELECT 1 FROM device_codes WHERE user_code = ?").get(code); i++) code = userCode();
+  q("DELETE FROM device_codes WHERE expires_at < ?").run(now() - 3600);
   q("INSERT INTO device_codes (device_code, user_code, device_name, expires_at) VALUES (?, ?, ?, ?)").run(sha256(deviceCode), code, deviceName, now() + CODE_TTL);
-  res.json({ deviceCode, userCode: code, verificationUrl: `${config.baseUrl}/device?code=${encodeURIComponent(code)}`, expiresIn: CODE_TTL, interval: 3 });
+  // 生产用配置的 BASE_URL；开发/局域网测试时用软件实际访问到的地址，避免把 localhost 发给另一台电脑
+  const base = config.isProd ? config.baseUrl : `${req.protocol}://${req.get("host")}`;
+  res.json({ deviceCode, userCode: code, verificationUrl: `${base}/device?code=${encodeURIComponent(code)}`, expiresIn: CODE_TTL, interval: 3 });
 });
 
 /** 软件轮询：pending → approved 时换发长期设备令牌（只发一次） */

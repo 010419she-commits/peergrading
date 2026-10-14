@@ -41,7 +41,8 @@
       const boot = await (await fetch("/api/auth/bootstrap")).json();
       $("#cloud").textContent = boot.cloudUrl.replace(/^https?:\/\//, "");
       if (boot.paired && boot.user) return location.replace("/app");
-      if (boot.lastError) $("#err").textContent = boot.lastError;
+      if (boot.paired && !boot.user) $("#err").textContent = (boot.lastError || "") + " 本机已配对，但超过 72 小时未能向云端核对，请联网后刷新；或点「生成配对码」重新连接。";
+      else if (boot.lastError) $("#err").textContent = boot.lastError;
       $("#cloud-url").value = boot.cloudUrl === boot.cloudDefault ? "" : boot.cloudUrl; $("#cloud-url").placeholder = boot.cloudDefault;
       $("#cloud-save").onclick = async () => {
         const r = await fetch("/api/local/cloud", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": boot.csrf }, body: JSON.stringify({ url: $("#cloud-url").value }) });

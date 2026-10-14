@@ -98,7 +98,10 @@ api.get("/sessions", (req, res) => {
   const list = fs.existsSync(SESSIONS) ? fs.readdirSync(SESSIONS).filter((d) => {
     const f = path.join(SESSIONS, d, "session.json");
     if (!fs.existsSync(f)) return false;
-    try { return JSON.parse(fs.readFileSync(f, "utf8")).userId === u.id; } catch { return false; }
+    try {
+      const fd = fs.openSync(f, "r"); const buf = Buffer.alloc(256); const n = fs.readSync(fd, buf, 0, 256, 0); fs.closeSync(fd);
+      return new RegExp(`"userId":\\s*${u.id}\\b`).test(buf.subarray(0, n).toString("utf8"));   // session.json 以 {"id":…,"userId":…} 开头
+    } catch { return false; }
   }).sort().reverse() : [];
   res.json(list);
 });
@@ -169,9 +172,8 @@ async function saveVersions(sessionId: string, dir: string, result: Awaited<Retu
   const ids: Record<number, string> = {};
   if (!result) return ids;
   const store = new VersionStore(dir);
-  const approved = /认为第 \d+ 版已达标|认可第 \d+ 版|approved version \d+/.test(result.reason);
   for (const v of result.versions) {
-    const reviewStatus = v.n === result.finalVersion ? (approved ? "passed" : "unknown") : "not-passed";
+    const reviewStatus = v.n === result.finalVersion ? (result.approved ? "passed" : "unknown") : "not-passed";
     const saved = await store.save({ sessionId, round: v.n - 1, author: v.name, reviewStatus, content: v.content });
     ids[v.n] = saved.id;
   }
@@ -255,6 +257,6 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
 app.listen(config.port, HOST, () => {
   console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${getCloudUrl()}, paired=${isPaired()})`
-    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${!!config.wechat.open.appId})`);
+    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

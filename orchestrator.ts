@@ -165,6 +165,7 @@ export interface RunResult {
   versions: { n: number; agent: AgentKey; name: string; content: string }[];
   finalVersion: number;
   reason: string;
+  approved: boolean;   // 最终版是否经审查者判定「通过」（false = 达到最大轮数）
 }
 
 export async function runCollaboration(
@@ -187,14 +188,14 @@ export async function runCollaboration(
   const draft = await A.say("draft", 0, T.draft());
   let current = pushVersion(A, extractDeliverable(draft));
 
-  let author = A, reviewer = B, reason = "";
+  let author = A, reviewer = B, reason = "", approved = false;
 
   for (let round = 1; round <= cfg.maxRounds; round++) {
     emit({ type: "status", text: T.s_review(round, reviewer.cfg.name, current.n) });
     const review = await reviewer.say("review", round, T.review(author.cfg.name, current.n, current.content));
     let verdict = parseVerdict(review);
     if (verdict === "approve") {
-      reason = T.s_approved(round, reviewer.cfg.name, current.n);
+      reason = T.s_approved(round, reviewer.cfg.name, current.n); approved = true;
       emit({ type: "status", text: reason });
       break;
     }
@@ -210,7 +211,7 @@ export async function runCollaboration(
       }
     }
     if (verdict === "approve") {
-      reason = T.s_approved2(round, reviewer.cfg.name, current.n);
+      reason = T.s_approved2(round, reviewer.cfg.name, current.n); approved = true;
       emit({ type: "status", text: reason });
       break;
     }
@@ -226,5 +227,5 @@ export async function runCollaboration(
     emit({ type: "status", text: reason });
   }
   emit({ type: "done", reason, finalVersion: current.n });
-  return { versions, finalVersion: current.n, reason };
+  return { versions, finalVersion: current.n, reason, approved };
 }

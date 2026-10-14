@@ -29,17 +29,17 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 
 ## 登录与账号（v9 规格）
 
-- 微信（开放平台扫码 / 公众号内登录）与 Google 登录；首次登录自动建账号。
+- Google 登录（面向海外发布；微信登录已移除）；首次登录自动建账号。
 - 浏览器认证版本 `auth_epoch`、一次性认证事务、服务端会话（HttpOnly Cookie）、与会话绑定的 CSRF 令牌、返回位置白名单。
-- 账号页支持切换账号、重新验证、绑定 / 解绑（解绑微信整组移除），至少保留一种登录方式。
+- 账号页支持切换账号、重新验证、绑定 / 解绑，至少保留一种登录方式。
 - 本地开发可用 `DEV_LOGIN=1` 启用“开发者登录”，不需要任何第三方凭证即可走通全部流程；生产环境该入口不存在。
 
-平台申请步骤见 `docs/final-v9-login-membership.md` §8。
+Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部分不再适用）。
 
-## 试用与买断
+## 试用与月付
 
-- 注册后 **3 天内可免费使用 5 次**协作（先到者为准），之后需购买；`TRIAL_DAYS` / `TRIAL_USES` 可改。
-- 默认 **18.8 元一次买断**（永久权益）；`PLAN_MODE=days` + `PLAN_DAYS=30` 即改为按期会员。
+- 注册后 **3 天内可免费使用 5 次**协作（先到者为准），之后需订阅；`TRIAL_DAYS` / `TRIAL_USES` 可改。
+- 默认 **每月 18 元**（`PLAN_MODE=days`、`PLAN_DAYS=30`、`PRICE_CENTS=1800`）：每次付款延长 30 天，会员期内可提前续费（顺延累加），到期不自动扣费。改 `CURRENCY=USD` 即按美元计价；`PLAN_MODE=permanent` 改为一次买断。自动扣费的订阅需要接 Stripe 等渠道的 subscription，当前未接。
 - 权益模型按 v9 §5.10 / §6：区间、永久、幂等授予、撤销。
 
 ### 收款怎么接
@@ -141,7 +141,8 @@ npm run dist:win              # Windows 安装包（需在 Windows 或配好交�
 1. 把代码推到 GitHub（仓库名 `dual-agent-review-loop`）。
 2. 域名 DNS：`peergrading.ai` 与 `www` 各加一条 A 记录指向服务器 IP。
 3. 在服务器上执行一次 `deploy/setup-server.sh <你的GitHub用户名>`：装 Docker 与 Caddy，拉代码，生成 `.env` 骨架并把 Caddy 配成自动 HTTPS。
-4. 编辑服务器上的 `/srv/peergrading/.env`：`BASE_URL=https://peergrading.ai`、`SESSION_SECRET`（脚本已生成）、至少一个登录渠道（Google 最快，`GOOGLE_CLIENT_ID/SECRET`，回调填 `https://peergrading.ai/auth/google/callback`）、`KIMI_API_KEY`、收款信息。
+4. 编辑服务器上的 `/srv/peergrading/.env`：`BASE_URL=https://peergrading.ai`、`SESSION_SECRET`（脚本已生成）、Google 登录（`GOOGLE_CLIENT_ID/SECRET`，回调填 `https://peergrading.ai/auth/google/callback`）、收款信息。
+   域名在 Cloudflare：DNS 里给 `peergrading.ai` 和 `www` 各加一条 **A 记录指向服务器 IP，代理状态先选「仅 DNS」（灰色云）**，Caddy 才能自动申请证书；需要 Cloudflare 代理时再切橙色云并把 SSL 模式设为 Full (strict)。
 5. 运行 `deploy/deploy.sh`，访问 https://peergrading.ai。
 
 **之后每次修改**

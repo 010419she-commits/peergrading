@@ -5,7 +5,7 @@ import { requireBrowser, requireAuthApi } from "../auth/middleware.ts";
 import { requireCsrf, AuthError, logAuthError, randomToken } from "../auth/security.ts";
 import { accessStatus } from "./access.ts";
 import { createOrder, getOrder, listOrders, processPayment, verifyWebhookSignature } from "./orders.ts";
-import { publicPlan } from "../auth/routes.ts";
+import { publicPlan } from "./plan.ts";
 
 export const billing = Router();
 
