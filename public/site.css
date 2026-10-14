@@ -232,3 +232,11 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
 @media (forced-colors: active) { .button, .cover, .contact-panel, .text-link { border-color: ButtonText; } :focus-visible { outline-color: Highlight; } }
+/* 下载 / 方案卡片 */
+.pricing { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; align-items: stretch; }
+.plan { border: 1px solid var(--line); background: var(--surface); padding: 36px 32px; display: grid; gap: 14px; align-content: start; justify-items: start; }
+.plan.featured { border-color: var(--accent); }
+.plan .fine { margin-top: 4px; }
+.header-inner .primary-nav { gap: 4px 20px; }
+.nav-auth { flex-wrap: nowrap; }
+.nav-auth .text-link { min-height: 36px; font-size: 14px; }
