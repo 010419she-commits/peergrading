@@ -9,5 +9,6 @@ services:
     volumes:
       - ./data:/app/data           # SQLite：用户、会话、订单
       - ./sessions:/app/sessions   # 协作记录、冻结版本、收尾报告
+      - ./downloads:/app/downloads # 软件安装包（用 deploy/upload-release.sh 上传）
     ports:
       - "127.0.0.1:3000:3000"      # 只对本机开放，由 Caddy 对外提供 HTTPS

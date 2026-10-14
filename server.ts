@@ -55,8 +55,16 @@ if (localMode) {
   app.use("/api/account", account);
   app.use(billing);
   app.use(device);
-  /* ---------- 产品页面（需登录 + 试用/会员） ---------- */
-  app.get("/app", requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));
+  /* ---------- 软件下载 ---------- */
+  const DOWNLOADS = process.env.DOWNLOADS_DIR || path.join(here, "downloads");
+  app.use("/download", express.static(DOWNLOADS, { index: false, dotfiles: "deny" }));
+  app.get("/api/download/latest", (_req, res) => {
+    const files = fs.existsSync(DOWNLOADS) ? fs.readdirSync(DOWNLOADS).filter((f) => /\.(dmg|exe|zip|AppImage)$/i.test(f)) : [];
+    const pick = (re: RegExp) => files.filter((f) => re.test(f)).map((f) => { const st = fs.statSync(path.join(DOWNLOADS, f)); const v = f.match(/(\d+\.\d+\.\d+)/)?.[1] ?? ""; return { file: f, url: `/download/${encodeURIComponent(f)}`, size: st.size, version: v, mtime: st.mtimeMs }; }).sort((a, b) => b.mtime - a.mtime)[0] ?? null;
+    res.json({ mac: pick(/\.dmg$/i), win: pick(/\.exe$/i) });
+  });
+  /* ---------- 网页版工作台（需登录 + 试用/会员；生产默认关闭） ---------- */
+  app.get("/app", (req, res, next) => (config.webWorkspace ? next() : res.redirect("/#download")), requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));
   app.get(["/account", "/account.html"], (_req, res) => res.sendFile(path.join(here, "public", "account.html")));
   app.get(["/device", "/device.html"], (_req, res) => res.sendFile(path.join(here, "public", "device.html")));
 }

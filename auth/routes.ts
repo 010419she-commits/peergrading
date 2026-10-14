@@ -45,7 +45,7 @@ auth.get("/api/auth/bootstrap", (req, res) => {
   ensureBrowser(req, res);
   res.json({
     status: r.user ? "authenticated" : "anonymous",
-    ...meJson(req), providers: providersFor(req), plan: publicPlan(),
+    ...meJson(req), providers: providersFor(req), plan: publicPlan(), webWorkspace: config.webWorkspace,
     csrf: issueCsrf({ bidHash: r.bidHash, sessionId: r.session?.id || null, authEpoch: r.authEpoch }),
   });
 });

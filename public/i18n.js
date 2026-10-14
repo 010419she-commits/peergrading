@@ -1,7 +1,7 @@
 // i18n.js — 中 / 英 界面文案
 window.I18N = {
   zh: {
-    appTitle: "双 Agent 协作循环",
+    appTitle: "PeerGrading",
     subtitle: "A 完成 → B 审查并讨论 → B 修改 → A 审查并讨论 → … 直到通过",
     task: "任务", taskPh: "例如：写一个 Python 函数解析 ISO 8601 日期并处理时区；或：为一款冥想 App 写 300 字应用商店简介……",
     agents: "智能体", slotA: "智能体 A · 先完成任务", slotB: "智能体 B · 先审查",
@@ -41,7 +41,7 @@ window.I18N = {
     lang: "English",
   },
   en: {
-    appTitle: "Dual-Agent Review Loop",
+    appTitle: "PeerGrading",
     subtitle: "A drafts → B reviews & discusses → B revises → A reviews & discusses → … until approved",
     task: "Task", taskPh: "e.g. Write a Python function that parses ISO 8601 dates with time zones; or: write a 100-word App Store description for a meditation app…",
     agents: "Agents", slotA: "Agent A · drafts first", slotB: "Agent B · reviews first",

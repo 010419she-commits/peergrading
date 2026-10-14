@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY . .
-RUN mkdir -p data sessions && chown -R node:node /app
+RUN mkdir -p data sessions downloads && chown -R node:node /app
 USER node
 EXPOSE 3000
 CMD ["node", "--no-warnings=ExperimentalWarning", "server.ts"]

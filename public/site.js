@@ -35,7 +35,7 @@
       const r = await fetch("/api/auth/bootstrap", { headers: { accept: "application/json" } });
       if (!r.ok) throw 0;
       const d = await r.json();
-      S.user = d.user; S.providers = d.providers; S.csrf = d.csrf; S.status = d.status; S.plan = d.plan;
+      S.user = d.user; S.providers = d.providers; S.csrf = d.csrf; S.status = d.status; S.plan = d.plan; S.webWorkspace = !!d.webWorkspace;
     } catch { S.status = "failed"; }
     renderAll();
   }
@@ -118,7 +118,8 @@
     if (S.user.avatar && /^https:\/\//.test(S.user.avatar)) { const img = el("img", { className: "avatar", src: S.user.avatar, alt: "", referrerPolicy: "no-referrer" }); img.addEventListener("error", () => img.remove()); box.append(img); }
     box.append(el("span", { className: "user-name", textContent: S.user.name || t("user") }));
     box.append(el("span", { className: "badge" + (isMember() ? "" : " soft"), textContent: isMember() ? t("memberBadge") : t("trialBadge")(S.user.access.trial.daysLeft, S.user.access.trial.usesLeft) }));
-    if (!/^\/app/.test(location.pathname)) box.append(el("a", { className: "button small button-primary", href: "/app", textContent: t("openApp") }));
+    if (S.webWorkspace && !/^\/app/.test(location.pathname)) box.append(el("a", { className: "button small button-primary", href: "/app", textContent: t("openApp") }));
+    else if (location.pathname === "/") box.append(el("a", { className: "button small button-primary", href: "#download", textContent: t("downloadNav") }));
     if (!/^\/account/.test(location.pathname)) box.append(el("a", { className: "text-link", href: "/account", textContent: t("account") }));
     const out = el("button", { className: "text-link", type: "button", textContent: t("logout") });
     out.addEventListener("click", busy(out, async () => {
@@ -132,11 +133,21 @@
   }
 
   /* ---------- 首页 CTA 与定价 ---------- */
-  $("#hero-cta")?.addEventListener("click", () => {
-    if (S.status === "failed") return bootstrap();
-    if (!S.user) return openLogin({ returnTo: "/app" });
-    location.assign("/app");
-  });
+  $("#hero-cta")?.addEventListener("click", () => { const d = $("#download"); d ? d.scrollIntoView({ behavior: "smooth" }) : location.assign("/#download"); });
+  /* ---------- 下载区 ---------- */
+  async function renderDownloads() {
+    const box = $("#downloads"); if (!box) return;
+    let d = null; try { d = await (await fetch("/api/download/latest")).json(); } catch {}
+    const mb = (n) => (n / 1048576).toFixed(0) + " MB";
+    const card = (title, sub, item, soon) => {
+      const c = el("div", { className: "plan" + (item ? " featured" : "") }, el("h3", { textContent: title }), el("p", { className: "muted", textContent: sub }));
+      if (item) { c.append(el("a", { className: "button button-primary", href: item.url, textContent: t("downloadBtn")(item.version) }), el("p", { className: "fine", textContent: `${item.file} · ${mb(item.size)}` })); }
+      else c.append(el("span", { className: "badge soft", textContent: soon }));
+      return c;
+    };
+    box.replaceChildren(card(t("dlMac"), t("dlMacSub"), d?.mac, t("dlSoon")), card(t("dlWin"), t("dlWinSub"), d?.win, t("dlSoon")));
+  }
+  renderDownloads();
   function planLines() {
     const p = S.plan; if (!p) return { price: "", period: "" };
     return { price: fmtMoney(p.priceCents, p.currency), period: p.mode === "permanent" ? t("buyout") : t("perDays")(p.days) };

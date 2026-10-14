@@ -36,6 +36,8 @@ export const config = {
   },
   /** 本地开发登录（无需任何第三方凭证）。仅当非生产 + BASE_URL 为 localhost + DEV_LOGIN=1 */
   devLogin: !isProd && isLocalBase && process.env.DEV_LOGIN === "1",
+  /** 云端的网页版工作台（用服务器上的 agent）。产品主体是桌面软件，生产默认关闭 */
+  webWorkspace: !isProd || process.env.WEB_WORKSPACE === "1",
   txTtlSec: 600,
   sessionTtlSec: 30 * 86400,
   reverifyWindowSec: 15 * 60,
@@ -48,7 +50,7 @@ export const config = {
   plan: {
     code: process.env.PLAN_CODE || "buyout",
     version: 1,
-    name: process.env.PRODUCT_NAME || "双 Agent 协作循环",
+    name: process.env.PRODUCT_NAME || "PeerGrading",
     entitlement: "member",
     mode: (process.env.PLAN_MODE === "days" ? "days" : "permanent") as "permanent" | "days",
     days: Number(process.env.PLAN_DAYS || 30),

@@ -54,7 +54,8 @@
         "dmg",
         "zip"
       ],
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "icon": "build/icon.png"
     },
     "win": {
       "target": [
@@ -63,6 +64,7 @@
     },
     "dmg": {
       "title": "PeerGrading"
-    }
+    },
+    "icon": "build/icon.png"
   }
 }
