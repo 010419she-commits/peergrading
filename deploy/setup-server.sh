@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# 在一台全新的 Ubuntu 22.04 / Debian 12 服务器上执行一次（以 root 或 sudo）：
-#   curl -fsSL https://raw.githubusercontent.com/<你的GitHub用户名>/dual-agent-review-loop/main/deploy/setup-server.sh | bash -s -- <你的GitHub用户名>
+# 在一台全新的 Ubuntu 22.04 / Debian 12 服务器上执行一次（以 root）。仓库是私有的，服务器不拉 git，
+# 先在本机把代码同步过去，再在服务器上运行本脚本：
+#   rsync -az --exclude node_modules --exclude .git --exclude .env --exclude data --exclude sessions --exclude downloads \
+#     --exclude release --exclude dist ./ root@<服务器IP>:/srv/peergrading/
+#   ssh root@<服务器IP> bash /srv/peergrading/deploy/setup-server.sh
+# （排除项和 .github/workflows/deploy.yml 里的一致；尤其不要把本机的 .env 传上去。）
+# 之后的更新由 GitHub Actions 自动 rsync 并调用 deploy/deploy.sh。
 set -euo pipefail
-GH_USER="${1:?用法: setup-server.sh <GitHub用户名>}"
-REPO="dual-agent-review-loop"
 APP_DIR="/srv/peergrading"
 
 apt-get update
@@ -21,9 +24,11 @@ if ! command -v caddy >/dev/null; then
   apt-get update && apt-get install -y caddy
 fi
 
-# 代码
-if [ ! -d "$APP_DIR" ]; then
-  git clone "https://github.com/$GH_USER/$REPO.git" "$APP_DIR"
+# 代码：由本机 rsync 过来（见文件开头），不在这里 clone
+if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
+  echo ">>> $APP_DIR 里没有代码。请先在本机仓库目录执行：" >&2
+  echo "    rsync -az --exclude node_modules --exclude .git --exclude .env --exclude data --exclude sessions --exclude downloads --exclude release --exclude dist ./ root@<服务器IP>:$APP_DIR/" >&2
+  exit 1
 fi
 cd "$APP_DIR"
 if [ ! -f .env ]; then

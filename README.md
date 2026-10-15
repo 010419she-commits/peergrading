@@ -140,9 +140,9 @@ npm run dist:win              # Windows 安装包（需在 Windows 或配好交�
 
 **第一次部署**
 
-1. 把代码推到 GitHub（仓库名 `dual-agent-review-loop`）。
+1. 把代码推到 GitHub（仓库名 `peergrading`）。
 2. 域名 DNS：`peergrading.ai` 与 `www` 各加一条 A 记录指向服务器 IP。
-3. 在服务器上执行一次 `deploy/setup-server.sh <你的GitHub用户名>`：装 Docker 与 Caddy，拉代码，生成 `.env` 骨架并把 Caddy 配成自动 HTTPS。
+3. 仓库是私有的，服务器不拉 git：先在本机把代码 rsync 到服务器的 `/srv/peergrading/`（命令见 `deploy/setup-server.sh` 开头），再在服务器上执行一次 `deploy/setup-server.sh`：装 Docker 与 Caddy，生成 `.env` 骨架并把 Caddy 配成自动 HTTPS。
 4. 编辑服务器上的 `/srv/peergrading/.env`：`BASE_URL=https://peergrading.ai`、`SESSION_SECRET`（脚本已生成）、Google 登录（`GOOGLE_CLIENT_ID/SECRET`，回调填 `https://peergrading.ai/auth/google/callback`）、收款信息。
    域名在 Cloudflare：DNS 里给 `peergrading.ai` 和 `www` 各加一条 **A 记录指向服务器 IP，代理状态先选「仅 DNS」（灰色云）**，Caddy 才能自动申请证书；需要 Cloudflare 代理时再切橙色云并把 SSL 模式设为 Full (strict)。
 5. 运行 `deploy/deploy.sh`，访问 https://peergrading.ai。
