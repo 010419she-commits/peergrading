@@ -77,13 +77,16 @@ export async function listRunningApps(): Promise<string[]> {
   return [...new Set(names.filter((n) => !skip.has(n)))].sort((a, b) => a.localeCompare(b));
 }
 
-/** 一键发送：把文本放进剪贴板，并把目标应用切到前台；粘贴与回车由用户自己完成 */
-export async function sendToApp(text: string, app?: string): Promise<{ ok: boolean; message: string }> {
+/** 一键发送：把文本放进剪贴板，并把目标应用切到前台；粘贴与回车由用户自己完成。
+ *  Windows 下进程名常与应用名不同（VS Code 是 Code），processNames 给出候选，再退回按窗口标题匹配 */
+export async function sendToApp(text: string, app?: string, processNames: string[] = []): Promise<{ ok: boolean; message: string }> {
   await pb("pbcopy", text);
   if (!app) return { ok: true, message: "copied" };
   const safe = app.replace(/["']/g, "");
   if (isWin) {
-    const r = await ps(`$p = Get-Process -Name '${safe.replace(/\.exe$/i, "")}' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1; if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null; 'activated' } else { 'not running' }`);
+    const names = [...new Set([...processNames, safe].map((n) => n.replace(/\.exe$/i, "").replace(/["']/g, "")))];
+    const list = names.map((n) => `'${n}'`).join(",");
+    const r = await ps(`$names = @(${list}); $p = Get-Process | Where-Object { $_.MainWindowTitle -and ($names -contains $_.ProcessName) } | Select-Object -First 1; if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*' } | Select-Object -First 1 }; if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null; 'activated' } else { 'not running' }`);
     return { ok: true, message: r.trim() || "activated" };
   }
   const r = await osascript(`tell application "${safe}" to activate`);
@@ -151,15 +154,22 @@ export class RelayBackend implements Backend {
   }
 }
 
-/** 在 Terminal.app 新窗口里运行一条命令并把终端切到前台（用于一次性登录） */
-export async function runInTerminal(command: string): Promise<{ ok: boolean; message: string }> {
+/** 在新终端窗口里运行一条命令并切到前台（用于一次性登录）。
+ *  macOS：Terminal.app 执行 command（已含代理前缀）；Windows：新开 cmd 窗口执行 argv，代理通过环境变量传入，避免 cmd 的引号规则 */
+export async function runInTerminal(cmd: { command: string; argv: string[]; env?: Record<string, string> }): Promise<{ ok: boolean; message: string }> {
   if (isWin) {
-    // 新开一个命令行窗口执行登录命令
-    await ps(`Start-Process cmd.exe -ArgumentList '/k ${command.replace(/'/g, "''")}'`);
+    // cmd /k 的引号规则：首尾各一个引号时 cmd 会去掉它们再执行，所以程序路径加引号、其余参数不含空格直接拼接
+    const line = cmd.argv.map((a, i) => (i === 0 || /\s/.test(a) ? `"${a.replace(/"/g, "")}"` : a)).join(" ");
+    const env = { ...process.env, ...(cmd.env || {}) };
+    await new Promise<void>((resolve) => {
+      const child = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Start-Process cmd.exe -ArgumentList '/k ${line.replace(/'/g, "''")}'`],
+        { windowsHide: true, env, timeout: 15000 }, () => resolve());
+      child.stdin?.end();
+    });
     return { ok: true, message: "opened" };
   }
   if (process.platform !== "darwin") return { ok: false, message: "only supported on macOS / Windows" };
-  const escaped = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escaped = cmd.command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const r = await osascript(`tell application "Terminal"\nactivate\ndo script "${escaped}"\nend tell`);
   return { ok: true, message: r };
 }

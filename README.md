@@ -123,11 +123,21 @@ Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部
 ```bash
 npm run desktop               # 本地开发：打包并启动 Electron（连接 https://peergrading.ai）
 npm run desktop:local-cloud   # 连接本机 3001 端口的开发用云端
-npm run dist:mac              # 生成 release/PeerGrading-*.dmg（未签名；公开分发需 Apple 开发者账号签名与公证）
+npm run dist:mac              # 生成 release/PeerGrading-*.dmg（有 Developer ID 证书与公证凭证时自动签名 + 公证，见下）
 npm run dist:win              # Windows 安装包（需在 Windows 或配好交叉打包环境）
+npm test                      # 单元测试（agent 查找 / 启动方式，含 Windows 模拟）
 ```
 
-- Windows 版：在 macOS 上直接 `npm run dist:win` 即可产出 `release/PeerGrading Setup <版本>.exe`（NSIS 安装包，含 x64 与 arm64）。Windows 上剪贴板与切换应用通过 PowerShell 实现，命令行 agent 的 `.cmd` 包装脚本经 shell 启动；收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
+**macOS 签名与公证**（没有这一步，Apple 芯片的 Mac 打开下载的应用会提示「已损坏」；临时办法是 `xattr -cr /Applications/PeerGrading.app`，下载页已写明）：
+
+1. 加入 [Apple Developer Program](https://developer.apple.com/programs/enroll/)（个人，99 美元/年）。
+2. 在打包用的 Mac 上装好 Xcode（或 Command Line Tools），Xcode → Settings → Accounts 登录 Apple ID → Manage Certificates → 「+」→ **Developer ID Application**。证书进入钥匙串后 electron-builder 会自动选用。
+3. 公证凭证二选一，打包前以环境变量给出（不要写进仓库）：
+   - 推荐 App Store Connect API 密钥：`APPLE_API_KEY`（.p8 文件路径）、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER`；
+   - 或 Apple ID：`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`（在 appleid.apple.com 生成的 App 专用密码）、`APPLE_TEAM_ID`。
+4. `npm run dist:mac`。配置里已开启 Hardened Runtime（`build/entitlements.mac.plist`）与 `notarize`；缺少凭证时只签名不公证并打印警告。公证通常几分钟，完成后 `spctl -a -vv release/mac-arm64/PeerGrading.app` 应显示 `accepted`。
+
+- Windows 版：在 macOS 上直接 `npm run dist:win` 即可产出 `release/PeerGrading Setup <版本>.exe`（NSIS 安装包，含 x64 与 arm64）。Windows 上剪贴板与切换应用通过 PowerShell 实现；命令行 agent 的查找只认 `.exe/.cmd/.bat`，并额外扫描 npm / pnpm / bun / scoop / winget 的全局目录与注册表里最新的 PATH；npm 生成的 `.cmd` 包装脚本不经 cmd.exe，直接运行其背后的 node 脚本或原生二进制（`agents/launch.ts`）；收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
 - 桌面模式由环境变量 `LOCAL_MODE=1` 开启（Electron 自动设置），数据放在系统的应用数据目录；`CLOUD_URL` 指向云端（默认 `https://peergrading.ai`）。
 - Electron 44 自带 Node 24，直接运行 `dist/server.mjs`（esbuild 打包的同一份服务）。
 - 云端接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（网页确认）、`GET /api/device/me`、`POST /api/device/usage`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。

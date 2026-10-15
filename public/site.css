@@ -237,6 +237,7 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 .plan { border: 1px solid var(--line); background: var(--surface); padding: 36px 32px; display: grid; gap: 14px; align-content: start; justify-items: start; }
 .plan.featured { border-color: var(--accent); }
 .plan .fine { margin-top: 4px; }
+.plan .fine code { display: inline-block; margin-top: 4px; padding: 2px 8px; border: 1px solid var(--line); background: var(--bg); font-size: 13px; user-select: all; word-break: break-all; }
 .header-inner .primary-nav { gap: 4px 20px; }
 .nav-auth { flex-wrap: nowrap; }
 .nav-auth .text-link { min-height: 36px; font-size: 14px; }

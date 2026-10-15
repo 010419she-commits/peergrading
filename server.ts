@@ -16,8 +16,9 @@ import { device, cleanupDeviceCodes } from "./auth/device.ts";
 import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
-import { detectAgents, getCachedAgent, startService, loginCommandFor } from "./agents/detect.ts";
+import { detectAgents, getCachedAgent, startService, loginCommandFor, windowsProcessNames } from "./agents/detect.ts";
 import { submitRelayReply, ignoreRelayText, sendToApp, listRunningApps, markOwnClipboardText, runInTerminal } from "./agents/relay.ts";
+import { getProxyEnv } from "./agents/proxy.ts";
 import { runFinalizer, VersionStore } from "./finalizer/service.ts";
 import { makeAgent } from "./finalizer/agent.ts";
 import { dockerAvailable } from "./finalizer/executor.ts";
@@ -82,13 +83,14 @@ api.post("/services/start", requireCsrf, async (req, res) => {
 api.post("/agents/login", requireCsrf, async (req, res) => {
   const cmd = await loginCommandFor(String(req.body?.id ?? ""));
   if (!cmd) return res.status(404).json({ ok: false, message: "no login command" });
-  const r = await runInTerminal(cmd.command);
+  const r = await runInTerminal({ command: cmd.command, argv: cmd.argv, env: cmd.proxy ? getProxyEnv() : {} });
   res.status(r.ok ? 200 : 500).json({ ...r, note: cmd.note });
 });
 api.post("/relay/send", requireCsrf, async (req, res) => {
   const text = String(req.body?.text ?? "");
   if (req.body?.requestId) markOwnClipboardText(String(req.body.requestId), text);
-  res.json(await sendToApp(text, req.body?.app ? String(req.body.app).slice(0, 80) : undefined));
+  const app = req.body?.app ? String(req.body.app).slice(0, 80) : undefined;
+  res.json(await sendToApp(text, app, app ? windowsProcessNames(app) : []));
 });
 api.post("/relay/reply", requireCsrf, (req, res) => res.status(submitRelayReply(String(req.body?.requestId ?? ""), String(req.body?.text ?? "")) ? 200 : 404).json({ ok: true }));
 api.post("/relay/ignore", requireCsrf, (req, res) => res.json({ ok: ignoreRelayText(String(req.body?.requestId ?? ""), String(req.body?.text ?? "")) }));

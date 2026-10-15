@@ -138,7 +138,7 @@
     const box = $("#downloads"); if (!box) return;
     let d = null; try { d = await (await fetch("/api/download/latest")).json(); } catch {}
     const mb = (n) => (n / 1048576).toFixed(0) + " MB";
-    const card = (title, sub, items, soon) => {
+    const card = (title, sub, items, soon, note) => {
       const c = el("div", { className: "plan" + (items.some(Boolean) ? " featured" : "") }, el("h3", { textContent: title }), el("p", { className: "muted", textContent: sub }));
       let any = false;
       for (const [label, item] of items) {
@@ -146,9 +146,11 @@
         c.append(el("a", { className: "button button-primary", href: item.url, textContent: `${t("downloadBtn")(item.version)}${label ? " · " + label : ""}` }), el("p", { className: "fine", textContent: `${item.file} · ${mb(item.size)}` }));
       }
       if (!any) c.append(el("span", { className: "badge soft", textContent: soon }));
+      // 未经 Apple 公证的应用在 macOS 上会被门禁报「已损坏」：安装后清掉隔离属性即可打开
+      if (any && note) c.append(el("p", { className: "fine" }, note.text, " ", el("code", { textContent: note.command })));
       return c;
     };
-    box.replaceChildren(card(t("dlMac"), t("dlMacSub"), [[t("dlApple"), d?.macArm], [t("dlIntel"), d?.macIntel]], t("dlSoon")), card(t("dlWin"), t("dlWinSub"), [["", d?.win]], t("dlSoon")));
+    box.replaceChildren(card(t("dlMac"), t("dlMacSub"), [[t("dlApple"), d?.macArm], [t("dlIntel"), d?.macIntel]], t("dlSoon"), { text: t("dlMacGatekeeper"), command: "xattr -cr /Applications/PeerGrading.app" }), card(t("dlWin"), t("dlWinSub"), [["", d?.win]], t("dlSoon")));
   }
   renderDownloads();
   function planLines() {

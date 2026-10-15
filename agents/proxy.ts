@@ -33,9 +33,11 @@ export function getProxyEnv(): Record<string, string> {
   return env;
 }
 
-/** 形如 `env HTTPS_PROXY=... HTTP_PROXY=...`，用于拼进终端命令 */
+/** 拼进终端命令的代理前缀：macOS / Linux 为 `env K='v' `，Windows 为 PowerShell 写法 `$env:K='v'; ` */
 export function proxyEnvPrefix(): string {
   const e = getProxyEnv();
-  const parts = Object.entries(e).map(([k, v]) => `${k}='${v}'`);
-  return parts.length ? `env ${parts.join(" ")} ` : "";
+  const entries = Object.entries(e);
+  if (!entries.length) return "";
+  if (process.platform === "win32") return entries.map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}'; `).join("");
+  return `env ${entries.map(([k, v]) => `${k}='${v}'`).join(" ")} `;
 }
