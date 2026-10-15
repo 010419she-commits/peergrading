@@ -149,7 +149,7 @@ npm run dist:win              # Windows 安装包（需在 Windows 或配好交�
 
 **之后每次修改**
 
-本地改好并用 `npm run dev` 验证 → `git push` → 服务器自动更新（已提供 GitHub Actions：在仓库 Secrets 里填 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`）。不想用 Actions 就 SSH 到服务器执行 `deploy/deploy.sh`。数据在 `data/` 与 `sessions/` 两个挂载目录里，重新部署不会丢。
+本地改好并用 `npm run dev` 验证 → `git push` → GitHub Actions 自动把代码 rsync 到服务器并重建容器（仓库 Secrets：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`；私钥在本机 `deploy/keys/github-actions`，不入库，公钥已装在服务器上）。也可以在本机直接 rsync 后执行 `deploy/deploy.sh`。数据在 `data/`、`sessions/`、`downloads/` 三个挂载目录里，重新部署不会丢。
 
 文件：`Dockerfile`、`docker-compose.yml`、`deploy/Caddyfile`、`deploy/setup-server.sh`、`deploy/deploy.sh`、`.github/workflows/deploy.yml`。
 
