@@ -175,5 +175,6 @@ test("子进程环境：只去掉嵌套会话标记，其余 CLAUDE_* 配置（g
 });
 
 test("给用户看的路径：Windows 按 PowerShell 写法，带引号的路径用 & 调用", () => {
-  assert.equal(launch.quoteForDisplay("C:\\Users\\a b\\x.cmd"), '& "C:\\Users\\a b\\x.cmd"');
+  assert.equal(launch.quoteForDisplay("C:\\Users\\a b\\x.cmd"), "& 'C:\\Users\\a b\\x.cmd'");
+  assert.equal(launch.quoteForDisplay("C:\\it's\\x.cmd"), "& 'C:\\it''s\\x.cmd'");
 });

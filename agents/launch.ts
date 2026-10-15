@@ -205,5 +205,5 @@ export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"
   child.kill(signal);
 }
 
-/** 给用户看的命令行写法：Windows 按 PowerShell 写（登录窗口与代理前缀 $env: 都是 PowerShell），带引号的路径要用 & 调用；其他平台用单引号 */
-export const quoteForDisplay = (p: string) => (WIN ? `& "${p.replace(/"/g, "")}"` : `'${p.replace(/'/g, `'\\''`)}'`);
+/** 给用户看的命令行写法：Windows 按 PowerShell 写（登录窗口与代理前缀 $env: 都是 PowerShell），单引号里 $ 和反引号不会被展开，带引号的路径要用 & 调用；其他平台用 sh 的单引号 */
+export const quoteForDisplay = (p: string) => (WIN ? `& '${p.replace(/'/g, "''")}'` : `'${p.replace(/'/g, `'\\''`)}'`);
