@@ -13,17 +13,17 @@ const HOME = os.homedir();
 /** Windows PowerShell 的完整路径（PATH 坏掉时也能用） */
 export const POWERSHELL = WIN ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
 
-/** 用户自定义的 npm 全局目录（`npm config set prefix …`，国内教程常见）：读 ~/.npmrc 的 prefix= */
+/** 用户自定义的 npm 全局目录（`npm config set prefix …`，国内教程常见）：环境变量、~/.npmrc、全局 npmrc 里的 prefix= */
 function npmPrefixDirs(): string[] {
+  const raw: string[] = [process.env.npm_config_prefix || process.env.NPM_CONFIG_PREFIX || ""];
+  const appData = process.env.APPDATA || path.join(HOME, "AppData", "Roaming");
+  for (const rc of [path.join(HOME, ".npmrc"), WIN ? path.join(appData, "npm", "etc", "npmrc") : "/usr/local/etc/npmrc"]) {
+    try { raw.push(fs.readFileSync(rc, "utf8").match(/^\s*prefix\s*=\s*(.+?)\s*$/m)?.[1] ?? ""); } catch {}
+  }
   const out: string[] = [];
-  for (const rc of [path.join(HOME, ".npmrc")]) {
-    try {
-      const m = fs.readFileSync(rc, "utf8").match(/^\s*prefix\s*=\s*(.+?)\s*$/m);
-      if (!m) continue;
-      let p = m[1].replace(/^["']|["']$/g, "").replace(/^~(?=$|[\\/])/, HOME).replace(/\$\{(\w+)\}/g, (_, k) => process.env[k] ?? "");
-      if (!p) continue;
-      out.push(WIN ? p : path.join(p, "bin"));     // Windows 上 prefix 本身就是 bin 目录，没有 bin\ 子目录
-    } catch {}
+  for (const r of raw) {
+    const p = r.replace(/^["']|["']$/g, "").replace(/^~(?=$|[\\/])/, HOME).replace(/\$\{(\w+)\}/g, (_, k) => process.env[k] ?? "");
+    if (p) out.push(WIN ? p : path.join(p, "bin"));     // Windows 上 prefix 本身就是 bin 目录，没有 bin\ 子目录
   }
   return out;
 }
@@ -178,14 +178,12 @@ export function launcherFor(bin: string): Launcher {
  *  含换行的参数 cmd 根本传不了（会在换行处截断命令），调用方须改走 stdin —— 见 backends.ts */
 export const quoteForCmd = (a: string) => (a === "" || /[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
 
-/** 子进程环境：去掉会让 Claude Code 误以为自己在嵌套会话里的变量，但保留它在 Windows 上需要的配置项 */
-const KEEP_CLAUDE_ENV = /^CLAUDE_(CODE_GIT_BASH_PATH|CONFIG_DIR|CODE_USE_|CODE_DISABLE_)/;
+/** 子进程环境：只去掉会让 Claude Code 误以为自己在嵌套会话里的几个标记（它只看 CLAUDECODE），
+ *  其余 CLAUDE_* 全部保留 —— CLAUDE_CODE_GIT_BASH_PATH / CLAUDE_CONFIG_DIR / CLAUDE_CODE_OAUTH_TOKEN / mTLS 证书等都是用户的正常配置 */
+const NESTED_MARKERS = new Set(["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_SESSION_ID"]);
 export function stripNestedClaudeEnv(src: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(src)) {
-    if (k === "CLAUDECODE" || (k.startsWith("CLAUDE_") && !KEEP_CLAUDE_ENV.test(k))) continue;
-    env[k] = v;
-  }
+  for (const [k, v] of Object.entries(src)) if (!NESTED_MARKERS.has(k)) env[k] = v;
   return env;
 }
 

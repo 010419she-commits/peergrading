@@ -49,7 +49,7 @@ function psRun(script: string, input?: string, opts: { env?: NodeJS.ProcessEnv; 
     child.stdin?.end(input ?? "");
   });
 }
-const ps = (script: string, input?: string) => psRun(script, input).then((r) => (r.ok ? r.out : ""));
+const ps = (script: string, input?: string) => psRun(script, input, { timeout: 10_000 }).then((r) => (r.ok ? r.out : ""));
 function pb(cmd: "pbcopy" | "pbpaste", input?: string): Promise<string> {
   if (isWin) {
     // Windows：通过 PowerShell 读写剪贴板（UTF-8）。写入时换行转成 CRLF（Windows 程序的惯例）；

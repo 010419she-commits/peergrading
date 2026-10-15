@@ -23,9 +23,28 @@ const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, ".claude");
 /** Codex 的配置目录（CODEX_HOME 可改；Windows 上同样是 %USERPROFILE%\.codex，桌面版与命令行共用） */
 const CODEX_HOME = process.env.CODEX_HOME || path.join(HOME, ".codex");
 
-/** Claude 桌面版内置的 Claude Code 二进制（不在 PATH 上时作为后备）。只有 macOS 版确认带了命令行；Windows 版的布局未经证实，不猜 */
+/** 在 root 下最多 depth 层内找名为 name 的文件（版本号目录按数字倒序，取最新的） */
+function findFileUnder(root: string, name: string, depth: number): string | null {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) if (e.isFile() && e.name.toLowerCase() === name.toLowerCase()) return path.join(root, e.name);
+  if (depth <= 0) return null;
+  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const d of dirs) { const hit = findFileUnder(path.join(root, d), name, depth - 1); if (hit) return hit; }
+  return null;
+}
+
+/** Claude 桌面版内置的 Claude Code 二进制（不在 PATH 上时作为后备）。
+ *  macOS：~/Library/Application Support/Claude/claude-code/<版本>/<hash>/claude.app/Contents/MacOS/claude；
+ *  Windows：对应的 userData 目录 %APPDATA%\Claude\claude-code\…（商店版在 %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude-code），内部布局未经证实，按文件名在几层内找 claude.exe */
 function findBundledClaude(): string | null {
-  if (WIN) return null;
+  if (WIN) {
+    const local = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+    const roots = [path.join(process.env.APPDATA || path.join(HOME, "AppData", "Roaming"), "Claude", "claude-code")];
+    for (const d of subdirs(path.join(local, "Packages"))) if (/^Claude_/.test(d)) roots.push(path.join(local, "Packages", d, "LocalCache", "Roaming", "Claude", "claude-code"));
+    for (const r of roots) { const hit = findFileUnder(r, "claude.exe", 3); if (hit) return hit; }
+    return null;
+  }
   const root = path.join(HOME, "Library", "Application Support", "Claude", "claude-code");
   try {
     const versions = fs.readdirSync(root).filter((v) => /^\d+\.\d+\.\d+$/.test(v))

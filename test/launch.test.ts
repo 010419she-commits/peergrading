@@ -169,9 +169,9 @@ test("非 npm 生成的 .cmd 退回 cmd.exe，参数按 cmd 规则加引号", ()
   assert.equal(launch.quoteForCmd("notify=[]"), "notify=[]");
 });
 
-test("子进程环境：去掉嵌套会话标记，保留 Windows 上需要的 Claude 配置项", () => {
-  const env = launch.stripNestedClaudeEnv({ CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", CLAUDE_CODE_SSE_PORT: "1", CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe", CLAUDE_CONFIG_DIR: "D:\\claude", CLAUDE_CODE_USE_POWERSHELL_TOOL: "1", PATH: "x" });
-  assert.deepEqual(env, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe", CLAUDE_CONFIG_DIR: "D:\\claude", CLAUDE_CODE_USE_POWERSHELL_TOOL: "1", PATH: "x" });
+test("子进程环境：只去掉嵌套会话标记，其余 CLAUDE_* 配置（git-bash 路径、配置目录、OAuth token）保留", () => {
+  const env = launch.stripNestedClaudeEnv({ CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", CLAUDE_CODE_SSE_PORT: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe", CLAUDE_CONFIG_DIR: "D:\\claude", CLAUDE_CODE_OAUTH_TOKEN: "t", PATH: "x" });
+  assert.deepEqual(env, { CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe", CLAUDE_CONFIG_DIR: "D:\\claude", CLAUDE_CODE_OAUTH_TOKEN: "t", PATH: "x" });
 });
 
 test("给用户看的路径：Windows 按 PowerShell 写法，带引号的路径用 & 调用", () => {
