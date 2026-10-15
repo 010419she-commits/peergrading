@@ -1,4 +1,6 @@
-# 双 Agent 协作循环 · Dual-Agent Loop
+# PeerGrading · 双 Agent 协作循环
+
+Two AI coding agents take turns as author and reviewer, critiquing, debating and revising each other's work until it passes. Desktop app for macOS / Windows + companion site at https://peergrading.ai.
 
 两个 AI 智能体轮流担任**作者**与**审查者**：A 完成第 1 版 → B 审查并与 A 讨论 → B 修改出第 2 版 → A 审查…… 直到审查者判定「通过」。网页自动识别你电脑上的 agent（Claude Code、Codex、Qwen Code、Kimi Code 等），一键选两个开始。
 
