@@ -137,7 +137,14 @@ npm test                      # 单元测试（agent 查找 / 启动方式，含
    - 或 Apple ID：`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`（在 appleid.apple.com 生成的 App 专用密码）、`APPLE_TEAM_ID`。
 4. `npm run dist:mac`。配置里已开启 Hardened Runtime（`build/entitlements.mac.plist`）与 `notarize`；缺少凭证时只签名不公证并打印警告。公证通常几分钟，完成后 `spctl -a -vv release/mac-arm64/PeerGrading.app` 应显示 `accepted`。
 
-- Windows 版：在 macOS 上直接 `npm run dist:win` 即可产出 `release/PeerGrading Setup <版本>.exe`（NSIS 安装包，含 x64 与 arm64）。Windows 上剪贴板与切换应用通过 PowerShell 实现；命令行 agent 的查找只认 `.exe/.cmd/.bat`，并额外扫描 npm / pnpm / bun / scoop / winget 的全局目录与注册表里最新的 PATH；npm 生成的 `.cmd` 包装脚本不经 cmd.exe，直接运行其背后的 node 脚本或原生二进制（`agents/launch.ts`）；收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
+- Windows 版：在 macOS 上直接 `npm run dist:win` 即可产出 `release/PeerGrading Setup <版本>.exe`（NSIS 安装包，含 x64 与 arm64）。Windows 上的差异都集中在 `agents/launch.ts` 与 `agents/relay.ts`：
+  - 命令行 agent 的查找只认 `.exe/.cmd/.bat/.com`（npm 还会生成一个无扩展名的 sh 脚本，不能运行），`.exe` 优先；除 PATH 外还扫描 npm / pnpm / yarn / bun / scoop / winget / volta / chocolatey 的全局目录、`~/.npmrc` 里自定义的 `prefix`、Codex / Cursor / CodeBuddy / droid 的官方安装目录；跳过 `%LOCALAPPDATA%\Microsoft\WindowsApps`（里面的 `Claude.exe` 是桌面版的别名，不是命令行）。
+  - npm / pnpm / yarn 生成的 `.cmd` 包装脚本不经 cmd.exe：解析出它背后的 node 脚本或原生 `.exe` 直接运行（Codex 直接定位到 `@openai/codex-win32-*` 里的 `codex.exe`）；只有手写的 `.cmd` 才退回 cmd.exe。
+  - Codex 找不到命令时，还会查官方 `install.ps1`（`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`）、winget 便携包、`CODEX_CLI_PATH`，以及商店版 ChatGPT（Codex）应用自带的 `codex.exe`（通过 `Get-AppxPackage` 找安装目录）。登录状态从 `%USERPROFILE%\.codex\auth.json` 读（`CODEX_HOME` 可改）。
+  - 桌面壳启动时用 PowerShell 读注册表里最新的系统 / 用户环境变量（UTF-8，未展开的原文），补齐缺失的变量并合并 PATH（装完 npm / pnpm / Claude Code 后不用重新登录）。
+  - 子进程环境去掉 `CLAUDECODE` 等嵌套会话标记，但保留 `CLAUDE_CODE_GIT_BASH_PATH`、`CLAUDE_CONFIG_DIR` 等 Claude Code 在 Windows 上需要的配置。
+  - 剪贴板与切换应用通过 PowerShell（`-EncodedCommand`，不受引号规则影响）实现；最小化的目标窗口会先还原；「打开终端登录」新开一个 PowerShell 窗口执行登录命令，与页面上显示的 `$env:` 代理前缀写法一致。
+  - 收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
 - 桌面模式由环境变量 `LOCAL_MODE=1` 开启（Electron 自动设置），数据放在系统的应用数据目录；`CLOUD_URL` 指向云端（默认 `https://peergrading.ai`）。
 - Electron 44 自带 Node 24，直接运行 `dist/server.mjs`（esbuild 打包的同一份服务）。
 - 云端接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（网页确认）、`GET /api/device/me`、`POST /api/device/usage`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。

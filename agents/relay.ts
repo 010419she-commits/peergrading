@@ -1,6 +1,7 @@
 // agents/relay.ts — 网页中转：把消息交给你手上的任意桌面应用，再把它的回答收回来
 import { execFile } from "node:child_process";
 import type { Backend, ChatRequest, ChatResult } from "./types.ts";
+import { POWERSHELL } from "./launch.ts";
 
 export type RelayMode = "manual" | "clipboard";
 
@@ -37,17 +38,24 @@ export function ignoreRelayText(requestId: string, text: string): boolean {
 const PB_ENV = { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" };
 
 const isWin = process.platform === "win32";
-function ps(script: string, input?: string): Promise<string> {
+/** 运行一段 PowerShell。脚本以 -EncodedCommand（UTF-16LE base64）传入，不受命令行引号规则影响 */
+function psRun(script: string, input?: string, opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}): Promise<{ ok: boolean; out: string; err: string }> {
   return new Promise((resolve) => {
-    const child = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => resolve(err ? "" : stdout));
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const child = execFile(POWERSHELL, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      { maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: opts.env, timeout: opts.timeout },
+      (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout ?? ""), err: err ? `${err.message}${stderr ? "\n" + stderr : ""}` : String(stderr ?? "") }));
+    child.stdin?.on("error", () => {});
     child.stdin?.end(input ?? "");
   });
 }
+const ps = (script: string, input?: string) => psRun(script, input).then((r) => (r.ok ? r.out : ""));
 function pb(cmd: "pbcopy" | "pbpaste", input?: string): Promise<string> {
   if (isWin) {
-    // Windows：通过 PowerShell 读写剪贴板（UTF-8）
-    if (cmd === "pbcopy") return ps("[Console]::InputEncoding=[Text.Encoding]::UTF8; $t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t", input);
-    return ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw").then((t) => t.replace(/\r\n/g, "\n"));
+    // Windows：通过 PowerShell 读写剪贴板（UTF-8）。写入时换行转成 CRLF（Windows 程序的惯例）；
+    // 读取时用 [Console]::Out.Write 而不是默认输出，否则 PowerShell 会在末尾多补一个换行，导致读回的内容与我们写入的不相等
+    if (cmd === "pbcopy") return ps("[Console]::InputEncoding=[Text.Encoding]::UTF8; $t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t", (input ?? "").replace(/\r?\n/g, "\r\n"));
+    return ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $t = Get-Clipboard -Raw; if ($t -ne $null) { [Console]::Out.Write([string]$t) }").then((t) => t.replace(/\r\n/g, "\n"));
   }
   return new Promise((resolve) => {
     const child = execFile(cmd, [], { maxBuffer: 16 * 1024 * 1024, env: PB_ENV }, (err, stdout) => resolve(err ? "" : stdout));
@@ -86,8 +94,21 @@ export async function sendToApp(text: string, app?: string, processNames: string
   if (isWin) {
     const names = [...new Set([...processNames, safe].map((n) => n.replace(/\.exe$/i, "").replace(/["']/g, "")))];
     const list = names.map((n) => `'${n}'`).join(",");
-    const r = await ps(`$names = @(${list}); $p = Get-Process | Where-Object { $_.MainWindowTitle -and ($names -contains $_.ProcessName) } | Select-Object -First 1; if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*' } | Select-Object -First 1 }; if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null; 'activated' } else { 'not running' }`);
-    return { ok: true, message: r.trim() || "activated" };
+    // 先按进程名找有窗口的进程，再按窗口标题；最小化的窗口先还原（AppActivate 只给焦点，不还原）
+    const r = await psRun(`$names = @(${list})
+$p = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($names -contains $_.ProcessName) } | Select-Object -First 1
+if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*' } | Select-Object -First 1 }
+if ($p) {
+  Add-Type -Namespace PG -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);'
+  $h = $p.MainWindowHandle
+  if ([PG.Win]::IsIconic($h)) { [PG.Win]::ShowWindowAsync($h, 9) | Out-Null }
+  [PG.Win]::SetForegroundWindow($h) | Out-Null
+  (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null
+  'activated'
+} else { 'not running' }`, undefined, { timeout: 15000 });
+    const msg = r.out.trim();
+    if (!r.ok) return { ok: false, message: r.err.slice(0, 300) || "powershell failed" };
+    return { ok: msg === "activated", message: msg || "not running" };
   }
   const r = await osascript(`tell application "${safe}" to activate`);
   return { ok: true, message: r === "" ? "activated" : r };
@@ -131,20 +152,29 @@ export class RelayBackend implements Backend {
       req.signal.addEventListener("abort", onAbort, { once: true });
 
       if (this.mode === "clipboard") {
-        let last = "", stableSince = 0;
+        let last = "", stableSince = 0, inFlight = false;
         const announced = new Set<string>();
+        // 是不是我们自己放进剪贴板的内容：剪贴板读回来可能多/少首尾空白，按去空白后比较
+        const isOwn = (cur: string, trimmed: string) => {
+          if (this.ownTexts.has(cur) || this.ownTexts.has(trimmed)) return true;
+          for (const t of this.ownTexts) if (t.trim() === trimmed) return true;
+          return false;
+        };
+        // Windows 上每次读剪贴板都要起一个 PowerShell（几百毫秒），上一次没读完就不再发起新的
         timer = setInterval(async () => {
+          if (done || inFlight) return;
+          inFlight = true;
+          const cur = await pb("pbpaste").finally(() => { inFlight = false; });
           if (done) return;
-          const cur = await pb("pbpaste");
           const trimmed = cur.trim();
-          if (!trimmed || this.ownTexts.has(cur) || this.ownTexts.has(trimmed) || announced.has(cur)) { last = ""; return; }
+          if (!trimmed || isOwn(cur, trimmed) || announced.has(cur)) { last = ""; return; }
           if (cur !== last) { last = cur; stableSince = Date.now(); return; }
           if (Date.now() - stableSince >= 800) {
             announced.add(cur);
             // 交给页面：显示预览并倒计时，用户可取消；倒计时结束页面调用 /api/relay/reply
             this.ctx.emit({ type: "relay_candidate", requestId, text: cur });
           }
-        }, 600);
+        }, isWin ? 1000 : 600);
       }
     });
 
@@ -155,18 +185,17 @@ export class RelayBackend implements Backend {
 }
 
 /** 在新终端窗口里运行一条命令并切到前台（用于一次性登录）。
- *  macOS：Terminal.app 执行 command（已含代理前缀）；Windows：新开 cmd 窗口执行 argv，代理通过环境变量传入，避免 cmd 的引号规则 */
+ *  macOS：Terminal.app 执行 command（已含代理前缀）；
+ *  Windows：新开一个 PowerShell 窗口执行 argv（与页面上显示的 $env: 代理前缀写法一致），代理通过环境变量继承给它；
+ *  内层脚本同样用 -EncodedCommand 传，路径里有空格、括号、& 都不怕 */
 export async function runInTerminal(cmd: { command: string; argv: string[]; env?: Record<string, string> }): Promise<{ ok: boolean; message: string }> {
   if (isWin) {
-    // cmd /k 的引号规则：首尾各一个引号时 cmd 会去掉它们再执行，所以程序路径加引号、其余参数不含空格直接拼接
-    const line = cmd.argv.map((a, i) => (i === 0 || /\s/.test(a) ? `"${a.replace(/"/g, "")}"` : a)).join(" ");
+    const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const inner = `$Host.UI.RawUI.WindowTitle = 'PeerGrading'\n& ${cmd.argv.map(q).join(" ")}`;
+    const encoded = Buffer.from(inner, "utf16le").toString("base64");
     const env = { ...process.env, ...(cmd.env || {}) };
-    await new Promise<void>((resolve) => {
-      const child = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Start-Process cmd.exe -ArgumentList '/k ${line.replace(/'/g, "''")}'`],
-        { windowsHide: true, env, timeout: 15000 }, () => resolve());
-      child.stdin?.end();
-    });
-    return { ok: true, message: "opened" };
+    const r = await psRun(`Start-Process -FilePath ${q(POWERSHELL)} -ArgumentList @('-NoExit','-EncodedCommand','${encoded}')`, undefined, { env, timeout: 15000 });
+    return r.ok ? { ok: true, message: "opened" } : { ok: false, message: r.err.slice(0, 300) || "failed to open PowerShell" };
   }
   if (process.platform !== "darwin") return { ok: false, message: "only supported on macOS / Windows" };
   const escaped = cmd.command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');

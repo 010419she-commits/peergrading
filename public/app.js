@@ -1,6 +1,7 @@
 const $ = (s) => document.querySelector(s);
 let lang = (() => { try { return localStorage.getItem("lang") || (navigator.language.startsWith("zh") ? "zh" : "en"); } catch { return "zh"; } })();
 const t = (k) => window.I18N[lang][k];
+const IS_WIN = /Windows/i.test(navigator.userAgent);   // 粘贴快捷键提示用
 
 let agents = [];
 let csrf = "", me = null;
@@ -219,8 +220,8 @@ function handle(ev) {
       sendBtn.textContent = t("relaySend")(app);
       sendBtn.onclick = async () => {
         sendBtn.disabled = true;
-        await fetch("/api/relay/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: ev.requestId, text: ev.text, app }) });
-        sendBtn.textContent = app ? t("relaySent") : t("copied"); sendBtn.disabled = false;
+        const r = await fetch("/api/relay/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requestId: ev.requestId, text: ev.text, app }) }).then((x) => x.json()).catch(() => ({ ok: false }));
+        sendBtn.textContent = !app ? t("copied") : r.ok ? t("relaySent")(IS_WIN) : t("relayNotRunning")(app); sendBtn.disabled = false;
       };
       panel.querySelector('[data-act="copy"]').onclick = (e) => { navigator.clipboard?.writeText(ev.text); e.target.textContent = t("copied"); };
       panel.querySelector('[data-act="submit"]').onclick = async (e) => {

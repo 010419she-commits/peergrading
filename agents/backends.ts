@@ -3,14 +3,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from "./types.ts";
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
-import { launcherFor, spawnCli, killTree } from "./launch.ts";
+import { WIN, launcherFor, spawnCli, killTree, stripNestedClaudeEnv } from "./launch.ts";
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === "CLAUDECODE" || k.startsWith("CLAUDE_")) continue;
-    env[k] = v;
-  }
+  const env = stripNestedClaudeEnv();
   // 境外服务（Anthropic / OpenAI）在国内直连会被拒，给命令行 agent 带上系统代理
   for (const [k, v] of Object.entries(getProxyEnv())) if (!env[k]) env[k] = v;
   return env;
@@ -117,6 +113,11 @@ class CliBackend implements Backend {
       prefixSystem = true;
     }
     if (prefixSystem) input = prefixed;
+
+    // 把整段提示词当命令行参数传的工具，在 Windows 上受限：cmd.exe 传不了含换行的参数；CreateProcess 的命令行上限 32767 字符
+    const promptInArgs = this.spec.type === "generic" && this.spec.promptVia === "arg";
+    if (promptInArgs && viaShell) return Promise.reject(new Error(`${this.spec.type}: 这个工具在 Windows 上通过 .cmd 脚本启动，无法把提示词作为参数传入；请改用它的 .exe 安装方式`));
+    if (promptInArgs && WIN && args.join(" ").length > 30_000) return Promise.reject(new Error(`${this.spec.type}: 对话记录太长，超出了 Windows 命令行参数的长度上限，请新开一轮协作`));
 
     return new Promise((resolve, reject) => {
       const child = spawnCli(bin, args, { env: cleanEnv(), cwd: req.cwd });

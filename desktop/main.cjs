@@ -14,18 +14,39 @@ function fixPath() {
   } catch {}
   for (const d of ["/opt/homebrew/bin", "/usr/local/bin", path.join(app.getPath("home"), ".local", "bin")]) if (!process.env.PATH.includes(d)) process.env.PATH += `:${d}`;
 }
-// Windows：从开始菜单 / 安装器启动时继承的 PATH 可能是登录时的旧值（装完 npm / Claude Code 后没重新登录就看不到它们）。
-// 把注册表里当前的系统 PATH 与用户 PATH 合并进来，并展开 %VAR%。
+// Windows：从开始菜单 / 安装器启动时继承的环境变量可能是登录时的旧值（装完 npm / Claude Code / pnpm 后没重新登录就看不到它们）。
+// 用 PowerShell 读出注册表里当前的系统与用户环境变量（未展开的原文、UTF-8 输出，reg.exe 会按本地代码页输出，中文用户名会被读坏），
+// 把缺少的变量补进来，再把两份 PATH 合并进当前 PATH，%VAR% 用合并后的变量表迭代展开（PNPM_HOME 这类只在注册表里的变量也能展开）。
 function fixWindowsPath() {
-  const read = (key) => {
-    try {
-      const out = execFileSync("reg", ["query", key, "/v", "Path"], { encoding: "utf8", timeout: 3000, windowsHide: true });
-      return out.match(/\bPath\s+REG_(?:EXPAND_)?SZ\s+(.*)/i)?.[1]?.trim() || "";
-    } catch { return ""; }
-  };
-  const expand = (s) => s.replace(/%([^%;]+)%/g, (m, k) => process.env[k] ?? m);
-  const parts = [process.env.PATH || "", read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"), read("HKCU\\Environment")]
-    .flatMap((s) => expand(s).split(";")).map((s) => s.trim()).filter(Boolean);
+  const USER = "HKCU:\\Environment", MACHINE = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment";
+  const script = `[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$o = @{}
+foreach ($k in @('${USER}', '${MACHINE}')) {
+  $h = @{}
+  try { $i = Get-Item -LiteralPath $k -ErrorAction Stop; foreach ($n in $i.GetValueNames()) { if ($n) { $h[$n] = [string]$i.GetValue($n, '', 'DoNotExpandEnvironmentNames') } } } catch {}
+  $o[$k] = $h
+}
+$o | ConvertTo-Json -Compress -Depth 3`;
+  let data;
+  try {
+    const ps = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const out = execFileSync(ps, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+      { encoding: "utf8", timeout: 10000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    data = JSON.parse(out);
+  } catch { return; }
+  const user = data?.[USER] || {}, machine = data?.[MACHINE] || {};
+  // 变量表：当前进程的 → 注册表系统级 → 注册表用户级（后者覆盖前者），键名不分大小写
+  const vars = new Map();
+  for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") vars.set(k.toUpperCase(), v);
+  const isPath = (k) => /^path$/i.test(k);
+  for (const src of [machine, user]) for (const [k, v] of Object.entries(src)) if (!isPath(k) && typeof v === "string") vars.set(k.toUpperCase(), v);
+  const expand = (s) => { for (let i = 0; i < 3 && /%[^%;]+%/.test(s); i++) s = s.replace(/%([^%;]+)%/g, (m, k) => vars.get(k.toUpperCase()) ?? m); return s; };
+  // 注册表里有、当前进程里没有的变量（如 PNPM_HOME、CODEX_HOME）补进来
+  const have = new Set(Object.keys(process.env).map((k) => k.toUpperCase()));
+  for (const src of [machine, user]) for (const [k, v] of Object.entries(src)) if (!isPath(k) && typeof v === "string" && !have.has(k.toUpperCase())) { process.env[k] = expand(v); have.add(k.toUpperCase()); }
+  const regPath = (src) => Object.entries(src).find(([k]) => isPath(k))?.[1] || "";
+  const parts = [process.env.PATH || "", regPath(machine), regPath(user)]
+    .flatMap((s) => expand(String(s)).split(";")).map((s) => s.trim()).filter(Boolean);
   const seen = new Set(); const merged = [];
   for (const p of parts) { const k = p.toLowerCase(); if (!seen.has(k)) { seen.add(k); merged.push(p); } }
   process.env.PATH = merged.join(";");
