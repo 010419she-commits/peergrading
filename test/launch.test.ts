@@ -43,7 +43,8 @@ const realEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 const CLAUDE_PLAT = process.arch === "arm64" ? "claude-code-win32-arm64" : "claude-code-win32-x64";
 
 before(async () => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pg-launch-"));
+  // 用真实路径：macOS 的 /var 是 /private/var 的符号链接，查找逻辑按真实路径（pnpm 的 junction）解析平台包，断言里的期望路径要和它一致
+  tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "pg-launch-")));
   npm = path.join(tmp, "npm");
   // npm -g 在 Windows 上为每个命令生成三个文件：无扩展名的 sh 脚本、.cmd、.ps1
   touch(path.join(npm, "codex"), "#!/bin/sh\nexec node ...\n");
