@@ -4,6 +4,8 @@ import cookieParser from "cookie-parser";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
+import { inspectRepository } from "./repository/workspace.ts";
+import { parseCheckCommands } from "./workspace-input.ts";
 import { config, wechatOpenReady } from "./auth/config.ts";
 import "./auth/db.ts";
 import { attachBrowser, cleanupBrowsers } from "./auth/browser.ts";
@@ -11,7 +13,7 @@ import { attachUser, noStore, requireAuthApi, requireAccessApi, requireAccessPag
 import { requireCsrf } from "./auth/security.ts";
 import { auth, account } from "./auth/routes.ts";
 import { cleanupTx } from "./auth/tx.ts";
-import { billing, paymentWebhook } from "./billing/routes.ts";
+import { billing, paymentWebhook, wechatWebhook, airwallexWebhook } from "./billing/routes.ts";
 import { admin, isAdmin } from "./billing/admin.ts";
 import { device, cleanupDeviceCodes } from "./auth/device.ts";
 import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
@@ -40,6 +42,8 @@ app.disable("x-powered-by");
 
 // 支付回调：在任何 body 解析之前注册，保留原始字节供验签
 app.post("/api/payments/webhook", ...paymentWebhook);
+app.post("/api/billing/webhooks/wechat", ...wechatWebhook);
+app.post("/api/billing/webhooks/airwallex", ...airwallexWebhook);
 
 app.use(cookieParser());
 app.use(express.json({ limit: "200kb" }));
@@ -94,6 +98,36 @@ if (localMode) {
 /* ---------- 协作接口（全部需登录；开始协作需使用权） ---------- */
 const api = express.Router();
 api.use(requireAuthApi);
+
+// Existing repositories belong to this computer. Public cloud accounts cannot select server paths.
+const repositoriesAvailable = localMode || (!config.isProd && config.devLogin);
+const requireRepositoryAccess = (_req: express.Request, res: express.Response, next: express.NextFunction) =>
+  repositoriesAvailable ? next() : res.status(403).json({ error: "repository_local_only" });
+api.get("/repositories/status", (_req, res) => res.json({ available: repositoriesAvailable }));
+api.post("/repositories/inspect", requireRepositoryAccess, requireCsrf, async (req, res) => {
+  try { res.json({ repository: await inspectRepository(String(req.body?.path || "")) }); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "invalid_repository" }); }
+});
+function loadRepositorySession(req: express.Request): { dir: string } | null {
+  const id = String(req.params.id || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  if (id && liveRuns.get(id) === (req as any).user.id) return { dir: path.join(SESSIONS, id) };
+  return loadOwnedSession(req);
+}
+api.get("/sessions/:id/repository", requireRepositoryAccess, (req, res) => {
+  const owned = loadRepositorySession(req);
+  if (!owned) return res.status(404).json({ error: "not_found" });
+  try { res.json({ repository: JSON.parse(fs.readFileSync(path.join(owned.dir, "repository", "manifest.json"), "utf8")) }); }
+  catch { res.status(404).json({ error: "not_found" }); }
+});
+api.get("/sessions/:id/repository/versions/:n.patch", requireRepositoryAccess, (req, res) => {
+  const owned = loadRepositorySession(req);
+  const n = String(req.params.n);
+  if (!owned || !/^[1-9]\d{0,2}$/.test(n)) return res.status(404).json({ error: "not_found" });
+  const file = path.join(owned.dir, "repository", `v${n}.patch`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "not_found" });
+  res.type("text/x-diff").sendFile(file);
+});
+
 
 api.get("/agents", async (req, res) => res.json({ agents: await detectAgents(req.query.refresh === "1") }));
 api.get("/apps", async (_req, res) => res.json({ apps: await listRunningApps() }));
@@ -171,7 +205,7 @@ api.get("/sessions/:id/media/:file", (req, res) => {
   res.type(mediaMime(file)).sendFile(f);
 });
 
-async function buildConfig(raw: any, cwd: string): Promise<RunConfig> {
+async function buildConfig(raw: any, cwd: string, sessionDir: string): Promise<RunConfig> {
   const task = String(raw?.task ?? "").trim();
   if (!task) throw new Error("EMPTY_TASK");
   const lang = raw?.lang === "en" ? "en" : "zh";
@@ -182,26 +216,35 @@ async function buildConfig(raw: any, cwd: string): Promise<RunConfig> {
     const runner = info.runner.type === "anthropic" && ["low", "medium", "high", "xhigh", "max"].includes(slot?.effort) ? { ...info.runner, effort: slot.effort } : info.runner;
     return { name: String(slot?.name || fallbackName).slice(0, 40), persona: String(slot?.persona ?? "").slice(0, 2000), agent: { ...info, runner } };
   };
-  return { task, lang, cwd, agentA: pick(raw.agentA, "Agent A"), agentB: pick(raw.agentB, "Agent B"),
+  const agentA = pick(raw.agentA, "Agent A"), agentB = pick(raw.agentB, "Agent B");
+  let repository: RunConfig["repository"];
+  if (raw?.mode === "repository") {
+    if (!repositoriesAvailable) throw new Error("repository_local_only");
+    if (![agentA, agentB].every((a) => ["claude-code", "codex"].includes(a.agent.runner.type))) throw new Error("repository_agents_required");
+    const info = await inspectRepository(String(raw.repository?.path || ""));
+    if (info.dirty) throw new Error("repository_dirty");
+    repository = { path: info.path, sessionDir, checks: parseCheckCommands(raw.repository?.testCommands) };
+  }
+  return { task, lang, cwd, repository, agentA, agentB,
     maxRounds: Math.min(10, Math.max(1, Number(raw?.maxRounds) || 3)), discussionTurns: Math.min(3, Math.max(1, Number(raw?.discussionTurns) || 1)) };
 }
 
 api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
   const u = (req as any).user;
-  const id = new Date().toISOString().replace(/[:.]/g, "-");
+  const id = new Date().toISOString().replace(/[:.]/g, "-") + "-" + crypto.randomBytes(3).toString("hex");
   const dir = path.join(SESSIONS, id);
   const workspace = path.join(dir, "workspace");
   let cfg: RunConfig;
   try {
     fs.mkdirSync(workspace, { recursive: true });
-    cfg = await buildConfig(req.body, workspace);
+    cfg = await buildConfig(req.body, workspace, dir);
   } catch (e: any) { return res.status(400).json({ error: e.message }); }
   if (localMode) {
     try { await reportUsage(id); }
     catch (e: any) { return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
   } else recordUsage(u, id);
   // 图片 / 视频生成：由界面勾选决定本次是否允许；未配置 API Key 时提示并照常协作
-  const want = { images: !!req.body?.media?.images, videos: !!req.body?.media?.videos };
+  const want = { images: !cfg.repository && !!req.body?.media?.images, videos: !cfg.repository && !!req.body?.media?.videos };
   let mediaNote = "";
   if (want.images || want.videos) {
     const ms = loadMediaSettings(DATA_DIR);
@@ -213,10 +256,10 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
   runs.set(id, ac); liveRuns.set(id, u.id);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   const events: Event[] = [];
-  const send = (ev: Event) => { events.push(ev); res.write(`data: ${JSON.stringify(ev)}\n\n`); };
+  const send = (ev: Event) => { events.push(ev); if (!res.destroyed) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
   res.write(`data: ${JSON.stringify({ type: "run", id })}\n\n`);
   if (mediaNote) send({ type: "status", text: mediaNote });
-  req.on("close", () => ac.abort());
+  res.on("close", () => { if (!res.writableEnded) ac.abort(); });
   let result: Awaited<ReturnType<typeof runCollaboration>> | null = null;
   try { result = await runCollaboration(cfg, send, ac.signal); }
   catch (e: any) {
@@ -263,6 +306,7 @@ const finalizeRuns = new Map<string, AbortController>();
 api.post("/finalize", requireCsrf, requireAccessApi, async (req, res) => {
   const owned = loadOwnedSession(req);
   if (!owned) return res.status(404).json({ error: "not_found" });
+  if (owned.data.config?.repository) return res.status(400).json({ error: "repository_uses_checks" });
   const n = Number(req.body?.versionN);
   const versions = owned.data.result?.versions ?? [];
   const v = versions.find((x: any) => x.n === n);
@@ -286,7 +330,7 @@ api.post("/finalize", requireCsrf, requireAccessApi, async (req, res) => {
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   const send = (ev: any) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
   send({ type: "run", runId, versionId: version.id });
-  req.on("close", () => ac.abort());
+  res.on("close", () => { if (!res.writableEnded) ac.abort(); });
   try {
     const result = await runFinalizer({
       task: owned.data.config.task, version, sessionDir: owned.dir,

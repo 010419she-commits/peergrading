@@ -5,7 +5,7 @@ import { config } from "./config.ts";
 import { now, AuthError } from "./security.ts";
 import { currentEpoch, bumpEpoch } from "./browser.ts";
 import { insertSession, revokeSession, readSession } from "./session.ts";
-import { resolveLogin, bindIdentity, matchReverify, type VerifiedIdentity } from "./users.ts";
+import { getUser, resolveLogin, bindIdentity, matchReverify, type VerifiedIdentity } from "./users.ts";
 import { claimReferral } from "../billing/referral.ts";
 
 function finish(req: Request, tx: any, identity: VerifiedIdentity): { redirect: string; sessionToken: string | null } {
@@ -14,6 +14,7 @@ function finish(req: Request, tx: any, identity: VerifiedIdentity): { redirect: 
     const session: any = readSession(req);
     if ((session?.id || null) !== (tx.session_id || null)) throw new AuthError("stale_tx");
     if (tx.user_id && session?.user_id !== tx.user_id) throw new AuthError("stale_tx");
+    if (tx.user_id && getUser(tx.user_id)?.status !== "active") throw new AuthError("account_disabled");
     const back = (path: string, k: string, v: string) => { const [p, h = ""] = path.split("#"); return `${p}${p.includes("?") ? "&" : "?"}${k}=${v}${h ? "#" + h : ""}`; };
 
     if (tx.intent === "bind") {

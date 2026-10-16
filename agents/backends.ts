@@ -4,6 +4,7 @@ import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from ".
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
 import { WIN, launcherFor, spawnCli, killTree, stripNestedClaudeEnv } from "./launch.ts";
+import { assertActive, spawnRepositoryProcess, stopRepositoryProcess, repositoryEnv } from "../repository/process.ts";
 
 function cleanEnv(): NodeJS.ProcessEnv {
   const env = stripNestedClaudeEnv();
@@ -72,7 +73,25 @@ function parseLine(line: string): ParsedLine | null {
   }
 }
 
-function buildCliArgs(spec: RunnerSpec, system: string, prompt: string): { args: string[]; useStdin: boolean; prefixSystem: boolean; textMode: boolean } {
+export function buildCliArgs(spec: RunnerSpec, system: string, prompt: string, repositoryAccess?: ChatRequest["repositoryAccess"]): { args: string[]; useStdin: boolean; prefixSystem: boolean; textMode: boolean } {
+  if (repositoryAccess) {
+    if (spec.type === "claude-code") {
+      return { useStdin: true, prefixSystem: false, textMode: false, args: [
+        "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence",
+        "--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        "--permission-mode", repositoryAccess === "write" ? "acceptEdits" : "plan",
+        "--tools", repositoryAccess === "write" ? "Read,Glob,Grep,Edit,Write" : "Read,Glob,Grep",
+        "--max-turns", "40", "--system-prompt", system, ...(spec.model ? ["--model", spec.model] : []),
+      ] };
+    }
+    if (spec.type === "codex") return { useStdin: true, prefixSystem: true, textMode: false, args: [
+      "exec", "--json", "--ephemeral", "-s", repositoryAccess === "write" ? "workspace-write" : "read-only",
+      "-c", 'approval_policy="never"', "-c", "notify=[]", "-c", "sandbox_workspace_write.network_access=false",
+      "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true", "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+      ...(spec.model ? ["-m", spec.model] : []), "-",
+    ] };
+    throw new Error("仓库协作只支持 Claude Code 或 Codex 命令行，所选后端无法安全执行文件操作");
+  }
   switch (spec.type) {
     case "generic":
       return { useStdin: spec.promptVia === "stdin", prefixSystem: true, textMode: spec.parse === "text",
@@ -102,12 +121,13 @@ class CliBackend implements Backend {
   constructor(spec: RunnerSpec) { this.spec = spec; }
 
   chat(req: ChatRequest): Promise<ChatResult> {
+    try { assertActive(req.signal); } catch (e) { return Promise.reject(e); }
     let input = renderTranscript(req.turns, req.lang);
     const prefixed = `[System instructions]\n${req.system}\n\n${input}`;
     const bin = (this.spec as any).bin as string;
     // 只有退回 cmd.exe 启动的 .cmd 包装脚本才无法安全传递含换行/引号的长参数：那时系统提示词改从 stdin 前置
     const viaShell = launcherFor(bin).shell;
-    let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed);
+    let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed, req.repositoryAccess);
     if (viaShell) {
       const i = args.indexOf("--system-prompt"); if (i >= 0) args.splice(i, 2);
       prefixSystem = true;
@@ -120,13 +140,24 @@ class CliBackend implements Backend {
     if (promptInArgs && WIN && [bin, ...args].reduce((n, a) => n + a.length + 3, 0) > 32_000) return Promise.reject(new Error(`${this.spec.type}: 对话记录太长，超出了 Windows 命令行参数的长度上限，请新开一轮协作`));
 
     return new Promise((resolve, reject) => {
-      const child = spawnCli(bin, args, { env: cleanEnv(), cwd: req.cwd });
+      const child = req.repositoryAccess
+        ? spawnRepositoryProcess(bin, args, req.cwd, repositoryEnv(cleanEnv()))
+        : spawnCli(bin, args, { env: cleanEnv(), cwd: req.cwd });
+      child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
       let buf = "", streamed = "", assistantText = "", result: string | undefined, model: string | undefined, stderr = "";
       let usage: { input: number; output: number } | undefined;
       let error: string | undefined;
 
-      const onAbort = () => killTree(child, "SIGTERM");
+      let escalation: ReturnType<typeof setTimeout> | undefined;
+      const onAbort = () => {
+        if (req.repositoryAccess) {
+          stopRepositoryProcess(child);
+          escalation ??= setTimeout(() => stopRepositoryProcess(child, "SIGKILL"), 1000);
+          escalation.unref();
+        } else killTree(child, "SIGTERM");
+      };
       req.signal.addEventListener("abort", onAbort, { once: true });
+      if (req.signal.aborted) onAbort();
 
       let raw = "";
       child.stdout.on("data", (chunk) => {
@@ -145,14 +176,26 @@ class CliBackend implements Backend {
         }
       });
       child.stderr.on("data", (d) => { stderr += d; req.onProgress?.({ phase: "running" }); });
-      child.on("error", (e) => { req.signal.removeEventListener("abort", onAbort); reject(e); });
+      child.on("error", (e) => { req.signal.removeEventListener("abort", onAbort); if (escalation) clearTimeout(escalation); reject(e); });
       child.on("close", (code) => {
         req.signal.removeEventListener("abort", onAbort);
+        if (escalation) { stopRepositoryProcess(child, "SIGKILL"); clearTimeout(escalation); }
+        if (req.repositoryAccess && !WIN) stopRepositoryProcess(child, "SIGKILL");
         if (req.signal.aborted) return reject(new Error("aborted"));
+        // Some CLIs emit a final JSON object without a trailing newline.
+        if (!textMode && buf.trim()) {
+          const p = parseLine(buf.trim());
+          if (p?.result !== undefined) result = p.result;
+          if (p?.assistantText) assistantText = p.assistantText;
+          if (p?.isError) error = p.error;
+          if (p?.model) model = p.model;
+          if (p?.usage) usage = p.usage;
+        }
         const text = textMode
           ? raw.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").trim()   // 去掉 ANSI 颜色码
           : (result && result.trim()) || assistantText || streamed;
-        if (error && !text) return reject(new Error(`${this.spec.type}: ${error}`));
+        if (code !== 0) return reject(new Error(`${this.spec.type} 运行失败（exit ${code}）${error || stderr ? "：" + (error || stderr).slice(-1000) : ""}`));
+        if (error) return reject(new Error(`${this.spec.type}: ${error}`));
         if (/^Not logged in/i.test(text)) return reject(new Error(`${this.spec.type}: 命令行尚未登录，请在终端运行并登录后重试`));
         if (!text) return reject(new Error(`${this.spec.type} 没有返回内容（exit ${code}）${stderr ? "：" + stderr.slice(-400) : ""}`));
         // 若没有逐字流式输出（例如 CLI 不支持 partial），把完整文本一次性推给前端

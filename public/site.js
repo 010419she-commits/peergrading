@@ -9,7 +9,7 @@
 
   const S = { status: "loading", user: null, providers: null, plan: null, csrf: "", returnTo: initialReturnTo() };
   const dialog = $("#login-modal"), toastEl = $("#toast");
-  let lastFocus = null;
+  let lastFocus = null, paymentPoll = null, pollingOrder = null;
 
   function initialReturnTo() {
     const p = new URLSearchParams(location.search).get("return_to");
@@ -30,6 +30,7 @@
   const fmtMoney = (cents, cur) => (cur === "CNY" ? "¥" : cur + " ") + (cents / 100).toFixed(2).replace(/\.00$/, "");
 
   async function bootstrap() {
+    clearTimeout(paymentPoll); pollingOrder = null;
     S.status = "loading";
     try {
       const r = await fetch("/api/auth/bootstrap", { headers: { accept: "application/json" } });
@@ -82,7 +83,7 @@
       f.lastChild.dataset.provider = provider; return f;
     };
     let any = false;
-    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); }
+    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); if (p.wechat.hint) box.append(el("p", { className: "fine", textContent: p.wechat.hint })); }
     if (p?.google?.available) { any = true; box.append(form("google", t("loginGoogle"))); if (p.google.hint) box.append(el("p", { className: "fine", textContent: p.google.hint })); }
     if (p?.dev?.available) { any = true; box.append(form("dev", t("loginDev"))); }
     if (!any) box.append(el("p", { className: "muted", textContent: t("noProviders") }));
@@ -210,6 +211,7 @@
     renderOrder(r.order);
   }
   function renderOrder(o) {
+    clearTimeout(paymentPoll);
     const host = $("#order-box") || $("#membership-status")?.parentElement; if (!host) return;
     let box = $("#order-panel"); if (!box) { box = el("div", { id: "order-panel", className: "order" }); host.append(box); }
     box.replaceChildren(
@@ -218,17 +220,72 @@
       el("div", {}, el("span", { className: "muted", textContent: t("planLabel") + " " }), el("span", { textContent: (S.plan?.plans || []).filter((x) => x.code === o.plan).map(planName)[0] || o.plan || "" })),
       el("div", {}, el("span", { className: "muted", textContent: t("amount") + " " }), el("strong", { textContent: fmtMoney(o.amountCents, o.currency) })),
     );
+    const checkoutBox = el("div", { className: "checkout-box" });
+    const methods = el("div", { className: "ops" });
+    const providers = o.paymentProviders || S.plan?.paymentProviders || [];
+    for (const provider of providers.filter((p) => p.configured)) {
+      const button = el("button", { className: "button small button-primary", type: "button", textContent: t(provider.id === "wechat" ? "payWechatOnline" : "payCardOnline"), disabled: !!o.checkoutProvider && o.checkoutProvider !== provider.id });
+      button.addEventListener("click", busy(button, async () => {
+        const r = await postJson(`/api/billing/orders/${encodeURIComponent(o.no)}/checkout`, { provider: provider.id });
+        if (!r.ok || !r.checkout) return toast(paymentError(r.error));
+        for (const other of methods.querySelectorAll("button")) if (other !== button) other.disabled = true;
+        const c = r.checkout;
+        if (c.kind === "qr") {
+          checkoutBox.replaceChildren(el("p", { textContent: t("scanWechatPay") }));
+          if (typeof c.qrDataUrl !== "string" || !c.qrDataUrl.startsWith("data:image/png;base64,")) return toast(t("paymentFailed"));
+          checkoutBox.append(el("img", { src: c.qrDataUrl, alt: t("payQr"), width: 280, height: 280 }), el("p", { className: "fine", textContent: t("paymentWaiting") }));
+          pollOrder(o.no, c.expiresAt);
+        } else if (c.kind === "airwallex") {
+          try { await loadCardSdk(); await window.PeerGradingCards.checkout(c, lang); }
+          catch { toast(t("paymentFailed")); }
+        }
+      }));
+      methods.append(button);
+    }
+    if (methods.childElementCount) box.append(methods, checkoutBox);
     if (o.qrUrl) box.append(el("img", { src: o.qrUrl, alt: t("payQr") }));
-    box.append(el("p", { className: "muted", textContent: o.instructions || t("payInstructionsDefault") }));
+    box.append(el("p", { className: "muted", textContent: o.instructions || (methods.childElementCount ? t("paymentChoose") : t("payInstructionsDefault")) }));
     const row = el("div", { className: "ops" });
     if (o.mockPay) { const b = el("button", { className: "button small button-primary", type: "button", textContent: t("mockPay") }); b.addEventListener("click", busy(b, async () => { const r = await postJson("/api/dev/pay", { no: o.no }); if (!r.ok) return toast(t("orderFailed")); toast(t("paid")); await bootstrap(); })); row.append(b); }
     const chk = el("button", { className: "text-link", type: "button", textContent: t("checkPaid") });
     chk.addEventListener("click", busy(chk, async () => {
-      const r = await fetch(`/api/billing/orders/${encodeURIComponent(o.no)}`).then((x) => x.json()).catch(() => null);
+      const r = await postJson(`/api/billing/orders/${encodeURIComponent(o.no)}/sync`);
       if (r?.order?.status === "paid") { toast(t("paid")); await bootstrap(); } else toast(t("notPaidYet"));
     }));
     row.append(chk); box.append(row);
     box.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function paymentError(error) {
+    if (error === "checkout_provider_locked") return t("paymentProviderLocked");
+    if (error === "payment_not_configured") return t("paymentUnavailable");
+    if (error === "csrf") return t("stale");
+    return t("paymentFailed");
+  }
+  function loadCardSdk() {
+    if (window.PeerGradingCards) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = el("script", { src: "/payment-sdk.js" });
+      script.onload = () => window.PeerGradingCards ? resolve() : reject(new Error("SDK unavailable"));
+      script.onerror = () => { script.remove(); reject(new Error("SDK unavailable")); }; document.head.append(script);
+    });
+  }
+  async function pollOrder(no, expiresAt, attempt = 0) {
+    clearTimeout(paymentPoll); pollingOrder = { no, expiresAt, attempt };
+    const host = $("#order-panel");
+    if (!host || document.hidden || attempt >= 120 || (expiresAt && Date.now() >= expiresAt * 1000)) return;
+    const r = await fetch(`/api/billing/orders/${encodeURIComponent(no)}`).then((r) => r.ok ? r.json() : null).catch(() => null);
+    if (r?.order?.status === "paid") { toast(t("paid")); return bootstrap(); }
+    paymentPoll = setTimeout(() => pollOrder(no, expiresAt, attempt + 1), 5000);
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && pollingOrder) pollOrder(pollingOrder.no, pollingOrder.expiresAt, pollingOrder.attempt); });
+  async function checkPaymentReturn() {
+    const no = new URLSearchParams(location.search).get("order");
+    if (location.pathname !== "/account" || !S.user || !no || !/^[A-Za-z0-9]{8,64}$/.test(no)) return;
+    const r = await postJson(`/api/billing/orders/${encodeURIComponent(no)}/sync`);
+    // The redirect only asks the server to query the gateway; it never grants membership.
+    if (r.ok && r.order?.status === "paid") { toast(t("paid")); history.replaceState(null, "", "/account"); await bootstrap(); }
+    else if (r.order) { renderOrder(r.order); toast(t("paymentWaiting")); pollOrder(no, null); }
   }
 
   /* ---------- 账号页 ---------- */
@@ -376,5 +433,5 @@
 
   window.SiteAuth = { openLogin, bootstrap, state: S, t };
   const y = $("#year"); if (y) y.textContent = String(new Date().getFullYear());
-  bootstrap().then(handleQuery);
+  bootstrap().then(() => { handleQuery(); return checkPaymentReturn(); });
 })();

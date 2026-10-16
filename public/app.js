@@ -40,6 +40,7 @@ let pickingSlot = null;
 let runId = null, controller = null;
 const msgs = new Map();
 const versions = [];
+let repositoryRun = false, repositoryManifest = null, diffRequest = 0;
 
 marked.setOptions({ breaks: true });
 /** 协作中生成的图片 / 视频以 media://文件名 引用，渲染时指向当前会话的媒体接口。在渲染器层做映射，代码块 / 行内代码里的引用原样保留 */
@@ -74,7 +75,7 @@ function applyI18n() {
   $("#history").options[0] && ($("#history").options[0].textContent = t("historyPh"));
   if (!msgs.size) $("#timeline").innerHTML = `<p class="sys">${esc(t("timelineEmpty"))}</p>`;
   if (!versions.length) $("#version-body").innerHTML = `<p class="sys">${esc(t("versionsEmpty"))}</p>`;
-  renderSlot("A"); renderSlot("B"); renderCards();
+  renderSlot("A"); renderSlot("B"); renderCards(); renderRepository();
 }
 $("#lang-seg").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -119,10 +120,11 @@ $("#refresh").onclick = () => loadAgents(true);
 
 function renderCards() {
   const box = $("#cards");
-  if (!agents.length) { box.innerHTML = `<p class="sys">${esc(t("none"))}</p>`; return; }
+  const shown = agents.filter((a) => !isRepositoryMode() || ["claude-code", "codex"].includes(a.runner?.type));
+  if (!shown.length) { box.innerHTML = `<p class="sys">${esc(t(isRepositoryMode() ? "repoAgentsRequired" : "none"))}</p>`; return; }
   box.innerHTML = "";
   let lastGroup = null;
-  for (const a of agents) {
+  for (const a of shown) {
     const group = a.auto ? "auto" : "manual";
     if (group !== lastGroup) { lastGroup = group; const h = document.createElement("div"); h.className = "group"; h.textContent = t(group === "auto" ? "groupAuto" : "groupManual"); box.appendChild(h); }
     const card = document.createElement("div");
@@ -168,19 +170,94 @@ async function startService(btn, service) {
   await loadAgents(true);
 }
 
+/* ---------- Existing repository collaboration ---------- */
+const isRepositoryMode = () => $("#work-mode").value === "repository";
+function repositoryError(code) {
+  if (/repository_dirty|未提交|dirty/i.test(code)) return t("repoDirty");
+  if (/repository_agents_required/.test(code)) return t("repoAgentsRequired");
+  if (/repository_local_only/.test(code)) return t("repoLocalOnly");
+  if (/check_|invalid_check/.test(code)) return t("repoInvalidCommand");
+  return code;
+}
+async function loadRepositoryAvailability() {
+  try {
+    const r = await fetch("/api/repositories/status"); const d = await r.json();
+    $("#work-mode option[value=repository]").disabled = !d.available;
+    $("#repository-browse").hidden = !d.available || !window.peergrading?.chooseRepository;
+  } catch {}
+}
+function updateRepositoryMode() {
+  $("#repository-config").hidden = !isRepositoryMode();
+  $("#media-images").closest(".media-opts").hidden = isRepositoryMode();
+  document.querySelector('[data-i18n="mediaTitle"]').hidden = isRepositoryMode();
+  if (isRepositoryMode()) {
+    const ready = agents.filter((a) => ["claude-code", "codex"].includes(a.runner?.type) && ["ready", "unverified"].includes(a.status));
+    for (const k of ["A", "B"]) if (!chosen[k] || !["claude-code", "codex"].includes(chosen[k].runner?.type)) chosen[k] = ready.find((a) => a !== chosen.A) || ready[0] || null;
+    renderSlot("A"); renderSlot("B");
+  }
+  renderCards();
+}
+async function inspectRepository() {
+  const path = $("#repository-path").value.trim();
+  if (!path) { $("#repository-info").textContent = t("repoNeedPath"); return; }
+  const r = await fetch("/api/repositories/inspect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+  const d = await r.json();
+  $("#repository-info").textContent = r.ok ? `${d.repository.branch || "HEAD"} · ${d.repository.head.slice(0, 8)} · ${d.repository.dirty ? t("repoDirty") : t("repoClean")}` : repositoryError(d.error || String(r.status));
+  if (r.ok) $("#repository-path").value = d.repository.path;
+}
+$("#work-mode").onchange = updateRepositoryMode;
+$("#repository-inspect").onclick = () => inspectRepository().catch((e) => { $("#repository-info").textContent = e.message; });
+$("#repository-browse").onclick = async () => {
+  try { const path = await window.peergrading?.chooseRepository(); if (path) { $("#repository-path").value = path; await inspectRepository(); } }
+  catch (e) { $("#repository-info").textContent = e.message; }
+};
+async function refreshRepositoryResult() {
+  if (!repositoryRun || !currentSessionId) return;
+  try { const r = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/repository`); if (r.ok) { repositoryManifest = (await r.json()).repository; renderRepository(); } } catch {}
+}
+function renderRepository() {
+  const box = $("#repository-result"); if (!box) return;
+  box.hidden = !repositoryManifest; if (!repositoryManifest) return;
+  const m = repositoryManifest;
+  $("#repository-location").textContent = `${t("repoBranch")}: ${m.branch || ""}\n${t("repoWorktree")}: ${m.worktreePath || ""}\n${t("repoStatuses")[m.status] || m.status || ""}`;
+  const snapshot = m.snapshots?.find((v) => v.n === currentVersion);
+  const checks = snapshot?.checks || m.checks || [];
+  $("#repository-checks").replaceChildren(...checks.map((c) => {
+    const row = document.createElement("div"); row.className = "repository-check";
+    const ok = c.ok ?? c.passed ?? c.code === 0;
+    row.textContent = `${ok ? "✓" : "✗"} ${(c.argv || c.command?.argv || []).join(" ")}${c.timedOut ? " (timeout)" : ""}`;
+    if (c.stdout || c.stderr) { const details = document.createElement("details"), title = document.createElement("summary"), output = document.createElement("pre"); title.textContent = lang === "zh" ? "查看输出" : "Output"; output.textContent = (c.stdout || "") + (c.stderr || ""); details.append(title, output); row.append(details); }
+    return row;
+  }));
+  const link = $("#repository-patch"); link.hidden = !snapshot || !currentSessionId;
+  if (snapshot && currentSessionId) {
+    link.download = `version-${currentVersion}.patch`;
+    link.href = `/api/sessions/${encodeURIComponent(currentSessionId)}/repository/versions/${currentVersion}.patch`;
+    const request = ++diffRequest;
+    fetch(link.href).then((r) => r.ok ? r.text() : "").then((text) => { if (request === diffRequest) $("#repository-diff").textContent = text.slice(0, 150_000); }).catch(() => {});
+  }
+}
+
 /* ---------- 运行 ---------- */
 function resetView() {
   $("#timeline").innerHTML = ""; $("#tabs").innerHTML = ""; $("#version-body").innerHTML = ""; $("#final").textContent = "";
   msgs.clear(); versions.length = 0; currentVersion = 0; currentSessionId = null;
+  repositoryManifest = null; repositoryRun = false; ++diffRequest; $("#repository-result").hidden = true; $("#repository-diff").textContent = "";
   if ($("#finalizer")) { $("#finalizer").hidden = true; $("#fin-log").innerHTML = ""; $("#fin-result").innerHTML = ""; }
 }
-function setRunning(on) { $("#start").disabled = on; $("#stop").disabled = !on; renderFinalizer(); }
+function setRunning(on) { $("#start").disabled = on; $("#stop").disabled = !on; for (const id of ["work-mode", "repository-path", "repository-tests", "repository-browse", "repository-inspect", "history"]) $("#" + id).disabled = on; renderFinalizer(); }
 function scrollBottom() { const tl = $("#timeline"); tl.scrollTop = tl.scrollHeight; }
 
 function handle(ev) {
   const tl = $("#timeline");
   switch (ev.type) {
     case "run": runId = ev.id; currentSessionId = ev.id; break;
+    case "repository_ready": repositoryRun = true; repositoryManifest = ev.repository; renderRepository(); break;
+    case "repository_snapshot":
+      if (repositoryManifest) { repositoryManifest.snapshots ||= []; const i = repositoryManifest.snapshots.findIndex((x) => x.n === ev.snapshot.n); if (i >= 0) repositoryManifest.snapshots[i] = ev.snapshot; else repositoryManifest.snapshots.push(ev.snapshot); repositoryManifest.finalCommit = ev.snapshot.commit; }
+      renderRepository(); break;
+    case "repository_check":
+      if (repositoryManifest) { repositoryManifest.checks ||= []; repositoryManifest.checks.push(ev.check); } renderRepository(); break;
     case "status": { const p = document.createElement("p"); p.className = "sys"; p.textContent = ev.text; tl.appendChild(p); $("#status").textContent = ev.text; scrollBottom(); break; }
     case "message_start": {
       const el = document.createElement("div"); el.className = "msg " + ev.agent;
@@ -311,7 +388,7 @@ function showVersion(n) {
   currentVersion = n;
   [...$("#tabs").children].forEach((b, i) => b.classList.toggle("active", i === n - 1));
   $("#version-body").innerHTML = render(v.content);
-  renderFinalizer();
+  renderFinalizer(); renderRepository();
 }
 
 /* ---------- 收尾 Agent ---------- */
@@ -352,7 +429,7 @@ $("#media-clear").onclick = () => saveMediaSettings(true);
 async function loadFinEnv() { try { finEnv = await (await fetch("/api/finalize/env")).json(); } catch { finEnv = { docker: false, hostSupported: true }; } renderFinalizer(); }
 function renderFinalizer() {
   const box = $("#finalizer"); if (!box) return;
-  const show = currentVersion > 0 && currentSessionId && !$("#start").disabled;
+  const show = !repositoryRun && currentVersion > 0 && currentSessionId && !$("#start").disabled;
   box.hidden = !show; if (!show) return;
   const autos = agents.filter((a) => a.auto && (a.status === "ready" || a.status === "unverified"));
   const sel = $("#fin-agent");
@@ -419,16 +496,18 @@ async function start() {
   if (!task.trim()) { $("#status").textContent = t("needTask"); return; }
   if (!chosen.A || !chosen.B) { $("#status").textContent = t("needAgents"); return; }
   const slot = (k) => ({ agentId: chosen[k].id, name: $("#name-" + k).value, persona: $("#persona-" + k).value, effort: $("#effort-" + k).value });
-  const body = { task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
-    media: { images: $("#media-images").checked, videos: $("#media-videos").checked } };
-  resetView(); setRunning(true);
+  if (isRepositoryMode() && !$("#repository-path").value.trim()) { $("#status").textContent = t("repoNeedPath"); return; }
+  if (isRepositoryMode() && ![chosen.A, chosen.B].every((a) => ["claude-code", "codex"].includes(a.runner?.type))) { $("#status").textContent = t("repoAgentsRequired"); return; }
+  const body = { mode: $("#work-mode").value, repository: isRepositoryMode() ? { path: $("#repository-path").value.trim(), testCommands: $("#repository-tests").value } : undefined, task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
+    media: { images: !isRepositoryMode() && $("#media-images").checked, videos: !isRepositoryMode() && $("#media-videos").checked } };
+  resetView(); repositoryRun = body.mode === "repository"; setRunning(true);
   controller = new AbortController();
   try {
     const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       if (res.status === 403 && j.error === "payment_required") { showPaywall(j.access); setRunning(false); return; }
-      const e = j.error; handle({ type: "error", message: e === "EMPTY_TASK" ? t("needTask") : e === "NO_AGENT" ? t("needAgents") : e }); return;
+      const e = j.error; handle({ type: "error", message: e === "EMPTY_TASK" ? t("needTask") : e === "NO_AGENT" ? t("needAgents") : repositoryError(e || String(res.status)) }); return;
     }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     while (true) {
@@ -445,7 +524,7 @@ async function start() {
   } finally {
     for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
     settleMediaRows();
-    setRunning(false); runId = null; loadHistory(); bootstrapAuth();
+    setRunning(false); runId = null; loadHistory(); bootstrapAuth(); refreshRepositoryResult();
   }
 }
 async function stop() { if (runId) await fetch("/api/stop/" + runId, { method: "POST" }); controller?.abort(); handle({ type: "status", text: t("stopped") }); }
@@ -457,9 +536,13 @@ async function loadHistory() {
 async function replay(id) {
   if (!id) return;
   const s = await (await fetch("/api/sessions/" + id)).json();
-  resetView(); currentSessionId = id;
+  resetView(); currentSessionId = id; repositoryRun = !!s.config.repository;
+  $("#work-mode").value = repositoryRun ? "repository" : "text";
+  if (repositoryRun) { $("#repository-path").value = s.config.repository.path; $("#repository-tests").value = (s.config.repository.checks || []).map((c) => c.argv.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ")).join("\n"); }
+  updateRepositoryMode();
   $("#task").value = s.config.task;
   for (const ev of s.events) handle(ev);
+  refreshRepositoryResult();
   for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; m.prog?.remove(); } }
 }
 
@@ -471,6 +554,6 @@ $("#start").onclick = start;
 $("#stop").onclick = stop;
 $("#history").onchange = (e) => replay(e.target.value);
 applyI18n();
-bootstrapAuth().then((ok) => { if (!ok) return; renderAccess(); loadHistory(); loadAgents(); loadFinEnv(); loadMediaSettings();
+bootstrapAuth().then((ok) => { if (!ok) return; renderAccess(); loadHistory(); loadAgents(); loadFinEnv(); loadMediaSettings(); loadRepositoryAvailability();
 fetch("/api/apps").then((r) => r.json()).then((j) => { $("#apps").innerHTML = j.apps.map((a) => `<option value="${esc(a)}">`).join(""); }).catch(() => {});
 });

@@ -13,14 +13,19 @@ export const listIdentities = (userId: number) =>
 export const getIdentity = (id: number) => q("SELECT * FROM identities WHERE id = ?").get(id) || null;
 
 const findIdentity = (p: VerifiedIdentity) => q("SELECT * FROM identities WHERE provider = ? AND issuer = ? AND provider_uid = ?").get(p.provider, p.issuer, p.uid);
-const findUnionLink = (p: VerifiedIdentity) => (p.unionDomain && p.unionId)
+const findUnionLink = (p: VerifiedIdentity) => (p.provider === "wechat" && p.unionDomain && p.unionId)
   ? q("SELECT * FROM wechat_union_links WHERE union_domain = ? AND union_id = ?").get(p.unionDomain, p.unionId) : null;
 
 function ensureUnionLink(p: VerifiedIdentity, userId: number) {
-  if (!p.unionDomain || !p.unionId) return;
+  if (p.provider !== "wechat" || !p.unionDomain || !p.unionId) return;
   const link = findUnionLink(p);
   if (!link) q("INSERT INTO wechat_union_links (union_domain, union_id, user_id) VALUES (?, ?, ?)").run(p.unionDomain, p.unionId, userId);
   else if (link.user_id !== userId) throw new AuthError("identity_conflict");
+}
+function checkUnionId(ident: any, p: VerifiedIdentity) {
+  if (p.provider === "wechat" && ident?.union_id && p.unionId && ident.union_id !== p.unionId) {
+    throw new AuthError("wx_bad_response");
+  }
 }
 const insertIdentity = (p: VerifiedIdentity, userId: number) => Number(q(
   "INSERT INTO identities (user_id, provider, issuer, provider_uid, channel, union_id, display_name, avatar_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -36,6 +41,7 @@ const fillProfile = (userId: number, p: VerifiedIdentity) => q(
 export function resolveLogin(p: VerifiedIdentity) {
   const ident = findIdentity(p);
   if (ident) {
+    checkUnionId(ident, p);
     ensureUnionLink(p, ident.user_id);
     touchIdentity(ident, p); fillProfile(ident.user_id, p);
     return { user: getUser(ident.user_id), identity: getIdentity(ident.id), created: false };
@@ -52,8 +58,9 @@ export function resolveLogin(p: VerifiedIdentity) {
 }
 
 export function bindIdentity(p: VerifiedIdentity, targetUserId: number): "bound" | "already" {
-  ensureUnionLink(p, targetUserId);
   const ident = findIdentity(p);
+  checkUnionId(ident, p);
+  ensureUnionLink(p, targetUserId);
   if (ident) {
     if (ident.user_id !== targetUserId) throw new AuthError("identity_conflict");
     touchIdentity(ident, p); return "already";
@@ -63,11 +70,12 @@ export function bindIdentity(p: VerifiedIdentity, targetUserId: number): "bound"
 }
 
 export function matchReverify(p: VerifiedIdentity, tx: any) {
-  ensureUnionLink(p, tx.user_id);
   const ident = findIdentity(p);
   if (!ident || ident.id !== tx.target_identity_id || ident.user_id !== tx.user_id || ident.link_version !== tx.target_link_version) {
     throw new AuthError("reverify_mismatch");
   }
+  checkUnionId(ident, p);
+  ensureUnionLink(p, tx.user_id);
   touchIdentity(ident, p);
   return ident;
 }

@@ -1,6 +1,6 @@
 {
   "name": "peergrading",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "PeerGrading · 两个 AI 智能体互相审查、讨论、修改的协作循环（网站 + 桌面软件）",
@@ -10,22 +10,26 @@
     "grant": "node --no-warnings=ExperimentalWarning scripts/grant-entitlement.ts",
     "confirm-order": "node --no-warnings=ExperimentalWarning scripts/confirm-order.ts",
     "users": "node --no-warnings=ExperimentalWarning scripts/list-users.ts",
-    "bundle": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "bundle": "npm run bundle:payments && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
     "desktop": "npm run bundle && ELECTRON_RUN_AS_NODE= electron .",
     "desktop:local-cloud": "npm run bundle && CLOUD_URL=http://localhost:3001 electron .",
     "dist:mac": "npm run bundle && electron-builder --mac",
     "dist:win": "npm run bundle && electron-builder --win --x64 --arm64",
     "dist:all": "npm run bundle && electron-builder --mac --win --x64 --arm64",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "bundle:payments": "esbuild web/payment-sdk.ts --bundle --platform=browser --format=iife --minify --outfile=public/payment-sdk.js"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
+    "@airwallex/components-sdk": "^1.35.2",
     "@anthropic-ai/sdk": "^0.133.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3",
     "google-auth-library": "^9.15.1",
+    "qrcode": "^1.5.4",
+    "shell-quote": "^1.12.0",
     "undici": "^8.12.2"
   },
   "main": "desktop/main.cjs",

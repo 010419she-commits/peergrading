@@ -6,9 +6,17 @@ Two AI coding agents take turns as author and reviewer, critiquing, debating and
 
 本版按三份评审稿重建：功能与账号体系按《网站微信 / Google 登录接入、会费制基础与视觉改造 · v9》，视觉按《品牌网站 · 视觉方向 A 样稿（第 4 版）》（深色 · 暖白 · 浅金），成果验证按《第 4 版：在成果版本后增加收尾 Agent》。前两份原稿在 `docs/`。
 
+## 0.3：直接协作修改已有仓库
+
+工作台新增「修改现有 Git 仓库」：选择本机仓库 → 两位 Claude Code / Codex 轮流修改真实文件、读取差异并审查 → 执行指定测试 → 保存每轮提交与补丁。任务在独立 Git worktree 与 `codex/peergrading-*` 分支运行，保留结果供你审阅合并。原目录须干净；不会自动合并、推送或重置原改动。桌面版可选择目录，`npm run dev` 也可输入绝对路径；公网生产站点不开放服务器目录操作。
+
+详细使用、验证命令和合并方法见 [仓库协作说明](docs/repository-collaboration.md)。原有文字 / 代码成果、媒体生成、收尾 Agent、早鸟与邀请功能保留。
+
+微信登录已补齐授权与绑定流程校验，申请与配置见 [微信登录接入](docs/wechat-login-setup.md)。收款新增微信 Native 扫码与 Airwallex 托管 Visa / Mastercard 结账、验签通知及主动查询补单，见 [收款接入说明](docs/payments-setup.md)。没有商户凭证时不会显示可用的在线支付按钮；本地测试不代表商户已获准真实收款。
+
 ## 运行
 
-需要 Node.js ≥ 24（直接运行 TypeScript，无需编译；SQLite 使用 Node 内置模块）。
+需要 Node.js ≥ 24（直接运行 TypeScript；SQLite 使用 Node 内置模块）。开发时若选择修改此工程自身，请将 `SESSIONS_DIR` 设为工程之外的绝对目录。
 
 ```bash
 npm install
@@ -56,11 +64,11 @@ Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-member
 
 ### 收款怎么接
 
-订单、支付事件、权益发放已按 v9 §6.4 实现（单事务、幂等、验签），支付渠道本身需要商户资质，留了三种接法：
+订单、支付事件和权益发放按单事务、幂等、验签处理。0.3 新增微信 Native 与 Airwallex 海外银行卡正式接口，完整开户配置见 [收款接入说明](docs/payments-setup.md)。以下人工方式与本地模拟保留：
 
 1. **个人收款（线下 / 扫码）**：在 `/admin` 填付款说明并上传收款码（或 `.env` 的 `PAY_INSTRUCTIONS` / `PAY_QR_URL`），用户下单后看到订单号、方案、金额与收款码；你在 `/admin` 的订单列表点「确认到账」（或执行 `npm run confirm-order -- <订单号>`），会员立即生效。
-2. **支付回调**：`POST /api/payments/webhook`，raw body 用 `PAYMENT_WEBHOOK_SECRET` 做 HMAC-SHA256，签名放 `x-signature` 头；body 为 `{event_id, merchant_order_no, amount_cents, currency, provider_txn_id, provider}`。接微信支付 / 支付宝时把它们的验签逻辑替换进 `billing/orders.ts` 的 `verifyWebhookSignature`。
-3. **本地模拟**：`npm run dev` 下订单面板有“模拟支付成功”按钮，用于验证整条链路。
+2. **支付回调**：`POST /api/payments/webhook`，raw body 用 `PAYMENT_WEBHOOK_SECRET` 做 HMAC-SHA256，签名放 `x-signature` 头；body 为 `{event_id, merchant_order_no, amount_cents, currency, provider_txn_id, provider}`。此通用接口仅供自建受信任的支付适配层使用。微信 Native 与 Airwallex 必须连接各自的 `/api/billing/webhooks/wechat`、`/api/billing/webhooks/airwallex`，不要使用本通用回调地址。
+3. **本地模拟**：在本地关闭免费内测后，`npm run dev` 下订单面板有“模拟支付成功”按钮，用于验证整条链路。
 
 运维脚本：`npm run users`（用户、状态与剩余天数）、`npm run grant -- <userId> member <days|permanent>`（手动发权益；后台用户列表也能直接赠送天数 / 永久）。
 

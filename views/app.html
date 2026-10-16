@@ -23,6 +23,17 @@
   </div>
   <div class="content">
     <aside class="sidebar">
+      <div class="group" data-i18n="workMode"></div>
+      <select id="work-mode"><option value="text" data-i18n="modeText"></option><option value="repository" data-i18n="modeRepository" disabled></option></select>
+      <div id="repository-config" hidden>
+        <label for="repository-path" data-i18n="repoPath"></label>
+        <div class="row"><input id="repository-path" spellcheck="false" data-i18n-ph="repoPathPh"><button class="btn sm" id="repository-browse" type="button" data-i18n="repoBrowse" hidden></button></div>
+        <button class="btn sm" id="repository-inspect" type="button" data-i18n="repoInspect"></button>
+        <p class="hint" id="repository-info"></p>
+        <label for="repository-tests" data-i18n="repoTests"></label>
+        <textarea id="repository-tests" rows="2" data-i18n-ph="repoTestsPh"></textarea>
+        <p class="hint" data-i18n="repoHelp"></p>
+      </div>
       <div class="group" data-i18n="task"></div>
       <textarea id="task" rows="6" data-i18n-ph="taskPh"></textarea>
       <div class="group" data-i18n="agents"></div>
@@ -78,6 +89,13 @@
       <div class="final" id="final"></div>
       <div class="tabs" id="tabs"></div>
       <div class="body" id="version-body"></div>
+      <section id="repository-result" class="repository-result" hidden>
+        <div class="group" data-i18n="repoResult"></div>
+        <pre id="repository-location"></pre>
+        <div id="repository-checks"></div>
+        <a id="repository-patch" class="btn sm" target="_blank" rel="noopener" data-i18n="repoViewDiff"></a>
+        <pre id="repository-diff" class="repository-diff"></pre>
+      </section>
       <div class="finalizer" id="finalizer" hidden>
         <div class="group" data-i18n="finTitle"></div>
         <p class="hint" data-i18n="finHint"></p>

@@ -6,7 +6,7 @@ import { ensureBrowser, bumpEpoch } from "./browser.ts";
 import { issueCsrf, requireCsrf, safeReturnTo, AuthError, logAuthError, randomToken } from "./security.ts";
 import { requireBrowser, requireAuthApi } from "./middleware.ts";
 import { googleAuthUrl, googleCallback } from "./google.ts";
-import { wechatAuthUrl, wechatCallback, wechatMode, isWechatUA } from "./wechat.ts";
+import { wechatAuthUrl, wechatCallback, wechatMode, wechatHint, isWechatUA } from "./wechat.ts";
 import { devAuthUrl, devAuthorizePage, devCallback, devReady } from "./dev.ts";
 import { revokeSession, clearSessionCookie, recentlyVerified, revokeAllSessions, insertSession, setSessionCookie } from "./session.ts";
 import { listIdentities, getIdentity, removeIdentities } from "./users.ts";
@@ -24,7 +24,7 @@ export function providersFor(req: Request) {
   return {
     inWechat,
     google: { available: googleReady(), hint: inWechat ? "微信内置浏览器可能无法完成 Google 登录，请在系统浏览器中打开本页" : null as string | null },
-    wechat: { available: !!mode, mode: mode === "mp" ? "mp" : mode === "open" ? "qr" : null },
+    wechat: { available: !!mode, mode: mode === "mp" ? "mp" : mode === "open" ? "qr" : null, hint: wechatHint(req) },
     dev: { available: devReady() },
   };
 }
@@ -64,7 +64,7 @@ auth.get("/login", (req, res) => {
       <input type="hidden" name="intent" value="${intent}"><input type="hidden" name="return_to" value="${esc(returnTo)}">
       <button class="button button-provider" type="submit">${label}</button></form>`;
   const buttons = [
-    p.wechat.available ? form("wechat", p.wechat.mode === "mp" ? "微信登录" : "微信扫码登录") : "",
+    p.wechat.available ? form("wechat", p.wechat.mode === "mp" ? "微信登录" : "微信扫码登录") + (p.wechat.hint ? `<p class="fine">${esc(p.wechat.hint)}</p>` : "") : "",
     p.google.available ? form("google", "Google 登录") + (p.google.hint ? `<p class="fine">${esc(p.google.hint)}</p>` : "") : "",
     p.dev.available ? form("dev", "开发者登录（仅本地）") : "",
   ].join("") || '<p class="muted">登录功能尚未开放。</p>';
@@ -125,7 +125,7 @@ account.post("/reverify", (req, res) => {
     const opts: any = { intent: "reverify", returnTo: "/account", userId: r.user.id, targetIdentityId: ident.id, targetLinkVersion: ident.link_version };
     let url: string | null;
     if (ident.provider === "wechat") {
-      // 微信身份按渠道重新验证：扫码身份只能在普通浏览器里验，公众号身份只能在微信里验
+      // 使用当前可用的同一渠道重新验证，避免跨 AppID 的 OpenID 混用。
       if (wechatMode(req) !== ident.channel) throw new AuthError("channel_unavailable");
       url = wechatAuthUrl(req, { ...opts, channel: ident.channel });
     } else url = authUrlFor(ident.provider, req, opts);

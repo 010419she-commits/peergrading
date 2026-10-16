@@ -9,6 +9,8 @@ export interface ChatRequest {
   turns: Turn[];              // 该智能体自己的完整对话历史（最后一条是本次要回复的 user 消息）
   lang: Lang;
   cwd: string;                // CLI 类后端的工作目录
+  /** Repository phases explicitly opt into file tools; ordinary conversations stay text-only. */
+  repositoryAccess?: "read-only" | "write";
   signal: AbortSignal;
   onDelta: (text: string) => void;
   onProgress?: (p: { phase: "reasoning" | "running"; chars?: number }) => void;
@@ -47,6 +49,7 @@ export interface AgentInfo {
   local: boolean;       // 本地部署 or 云端
   status: AgentStatus;
   auto: boolean;        // true = 一键全自动；false = 需要你在应用里手动粘贴/复制
+  repository?: boolean; // supports the restricted repository file-tool protocol
   statusDetail?: Text;
   hintCommand?: Text;   // 需要用户在终端执行的命令（登录等）
   service?: "lmstudio" | "ollama"; // 可由网页一键启动的本地服务

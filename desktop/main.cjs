@@ -1,5 +1,5 @@
 // desktop/main.cjs — Electron 外壳：在本机启动服务（桌面模式），窗口里打开工作台
-const { app, BrowserWindow, shell, Menu } = require("electron");
+const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const { execFileSync, execFile } = require("node:child_process");
@@ -84,11 +84,18 @@ async function start() {
   win = new BrowserWindow({
     width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: "#10141b", title: "PeerGrading",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.cjs") },
   });
+  ipcMain.removeHandler("peergrading:choose-repository");
+  ipcMain.handle("peergrading:choose-repository", async (event) => {
+    if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw new Error("Invalid window");
+    const result = await dialog.showOpenDialog(win, { title: "选择现有 Git 仓库 / Select a Git repository", properties: ["openDirectory"] });
+    return result.canceled ? null : result.filePaths[0] || null;
+  });
+  const openExternal = (url) => { try { if (["https:", "http:"].includes(new URL(url).protocol)) shell.openExternal(url); } catch {} };
   // 页面里 target=_blank 的链接（登录 / 账号 / 购买）用系统浏览器打开
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
-  win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith(base)) { e.preventDefault(); shell.openExternal(url); } });
+  win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: "deny" }; });
+  win.webContents.on("will-navigate", (e, url) => { if (new URL(url).origin !== base) { e.preventDefault(); openExternal(url); } });
   await win.loadURL(`${base}/`);
 }
 

@@ -163,3 +163,11 @@ textarea { resize: vertical; }
 .fin-result .st { font-weight: 600; } .fin-result .st.success { color: var(--ok); } .fin-result .st.failure { color: var(--warn); } .fin-result .st.unconfirmed, .fin-result .st.cancelled, .fin-result .st.skipped { color: var(--amber); }
 .fin-result pre { font-size: 11.5px; max-height: 160px; overflow: auto; background: var(--field); padding: 8px; border: 1px solid var(--line); }
 .fin-result a { color: var(--accent); }
+
+#repository-config { margin: 12px 0 20px; }
+#repository-config .row { align-items: center; }
+#repository-config .row input { min-width: 0; flex: 1; }
+.repository-result { border-top: 1px solid var(--line, #303b49); padding-top: 16px; margin-top: 18px; }
+.repository-result pre { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: #0c1018; border-radius: 6px; }
+.repository-diff { max-height: 460px; overflow: auto; }
+.repository-check { padding: 8px 0; font-size: 12px; }

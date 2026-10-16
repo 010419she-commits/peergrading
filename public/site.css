@@ -252,3 +252,6 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 .referral input { min-height: 40px; padding: 7px 12px; border: 1px solid var(--control-line); background: var(--bg); color: var(--ink); font-size: 15px; letter-spacing: .08em; text-transform: uppercase; width: 12em; max-width: 100%; }
 .referral .no, .order .no { font-family: ui-monospace, Menlo, monospace; letter-spacing: .06em; overflow-wrap: anywhere; }
 .wechat-group img { display: block; max-width: 220px; margin-bottom: 12px; border: 1px solid var(--line); }
+
+.checkout-box { margin: 20px 0; }
+.checkout-box img { display: block; max-width: 100%; border-radius: 8px; }

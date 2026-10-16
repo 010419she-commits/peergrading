@@ -567,7 +567,10 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
       if (ollama) agents.push(...localEntries(ollama, qwenBin));
     }
     agents.push(...relayEntries());
-    for (const a of agents) a.auto = a.kind !== "relay";
+    for (const a of agents) {
+      a.auto = a.kind !== "relay";
+      a.repository = a.kind === "cli" && (a.runner.type === "claude-code" || a.runner.type === "codex");
+    }
     // 全自动的排前面
     agents.sort((x, y) => Number(y.auto) - Number(x.auto));
     cache = { at: Date.now(), agents };
