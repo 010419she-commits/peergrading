@@ -40,7 +40,7 @@
     } catch { S.status = "failed"; }
     renderAll();
   }
-  function renderAll() { applyI18n(); renderNav(); renderPricing(); renderAccount(); renderDevicePage(); if (dialog?.open) renderLoginForms(dialog.dataset.intent || "login"); }
+  function renderAll() { applyI18n(); renderNav(); renderPricing(); renderAccount(); renderDevicePage(); renderStandaloneEmail(); if (dialog?.open) renderLoginForms(dialog.dataset.intent || "login"); }
 
   /* ---------- 桌面软件配对页 ---------- */
   function renderDevicePage() {
@@ -88,25 +88,98 @@
         el("button", { className: "button button-provider", type: "submit", textContent: label }));
       f.lastChild.dataset.provider = provider; return f;
     };
-    let any = false;
-    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); if (p.wechat.hint) box.append(el("p", { className: "fine", textContent: p.wechat.hint })); }
-    if (p?.google?.available) { any = true; box.append(form("google", t("loginGoogle"))); if (p.google.hint) box.append(el("p", { className: "fine", textContent: p.google.hint })); }
-    if (p?.dev?.available) { any = true; box.append(form("dev", t("loginDev"))); }
-    if (!any) box.append(el("p", { className: "muted", textContent: t("noProviders") }));
-    (box.querySelector(`[data-provider="${focused}"]`) || (dialog.open ? box.querySelector("button") : null))?.focus();
+    const emailOnly = intent === "bind" || intent === "reverify";
+    box.append(createEmailForm({intent,identityId:dialog.dataset.identityId || undefined,email:dialog.dataset.email || "",returnTo:S.returnTo}));
+    if (!emailOnly) {
+      const preferred = (focused || location.hash.slice(1));
+      for (const provider of ["google", "github"].sort((a,b) => Number(b === preferred) - Number(a === preferred))) {
+        const f = form(provider, t(provider === "google" ? "loginGoogle" : "loginGithub"));
+        f.lastChild.disabled = !p?.[provider]?.available;
+        box.append(f);
+        if (!p?.[provider]?.available) box.append(el("p", {className:"fine",textContent:`${provider === "google" ? "Google" : "GitHub"} · ${t("providerUnavailable")}`}));
+      }
+      if (p?.dev?.available) box.append(form("dev", t("loginDev")));
+    }
+    (box.querySelector(`[data-provider="${focused}"]`) || (dialog.open ? box.querySelector("input:not(:disabled),button:not(:disabled)") : null))?.focus();
   }
-  function openLogin({ intent = "login", returnTo } = {}) {
+  function emailError(code) { return t("emailErrors")[code] || (code === "csrf" ? t("stale") : code === "network" ? t("network") : t("opFailed")); }
+  let emailFormId = 0;
+  function createEmailForm({intent = "login", identityId, email = "", returnTo = S.returnTo} = {}) {
+    const suffix = ++emailFormId;
+    const form = el("form", {className:"email-login-form"});
+    const address = el("input", {id:`email-address-${suffix}`,type:"email",autocomplete:"email",inputMode:"email",placeholder:"you@example.com",required:true,maxLength:254,value:email});
+    const send = el("button", {type:"button",className:"button button-primary",textContent:t("emailSend")});
+    const message = el("p", {className:"fine",role:"status"});
+    const code = el("input", {id:`email-code-${suffix}`,type:"text",inputMode:"numeric",autocomplete:"one-time-code",pattern:"[0-9]{6}",maxLength:6,required:true,disabled:true});
+    const verify = el("button", {type:"submit",className:"button button-primary",textContent:t("emailVerify")});
+    const resend = el("button", {type:"button",className:"text-link",textContent:t("emailResend")});
+    const change = el("button", {type:"button",className:"text-link",textContent:t("emailChange")});
+    const verification = el("div", {className:"email-verification",hidden:true}, el("label", {htmlFor:code.id,textContent:t("emailCode")}),code,verify,el("div", {className:"ops"},resend,change));
+    const sendRow = el("div", {className:"email-send-row"},address,send);
+    form.append(el("label", {htmlFor:address.id,textContent:t("emailLabel")}),sendRow,message,verification);
+    const ready = !!S.providers?.email?.available;
+    address.disabled = send.disabled = !ready;
+    if (!ready) message.textContent = t("emailUnavailable");
+    let challenge = null, pending = false, deadline = 0, timer = null;
+    function controls() {
+      const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      address.disabled = !ready || pending || !!challenge;
+      send.hidden = !!challenge; send.disabled = !ready || pending || seconds > 0;
+      verification.hidden = !challenge; code.disabled = !challenge || pending; verify.disabled = pending;
+      verify.textContent = pending ? t("emailVerifying") : t("emailVerify");
+      send.textContent = pending ? t("emailSending") : t("emailSend");
+      resend.disabled = !ready || pending || seconds > 0; change.disabled = pending;
+      resend.textContent = seconds ? t("emailResendWait")(seconds) : t("emailResend");
+    }
+    async function sendCode() {
+      if (!ready || pending || Date.now() < deadline || !address.reportValidity()) return;
+      pending = true; message.textContent = ""; controls();
+      try {
+        const r = await postJson("/api/auth/email/start", {email:address.value.trim(),intent,return_to:returnTo,...(identityId ? {identityId:Number(identityId)} : {})});
+        if (!r.ok) { message.textContent = emailError(r.error); return; }
+        challenge = r; deadline = Date.now() + Math.max(1, Number(r.resendAfter) || 60) * 1000;
+        message.textContent = t("emailSent")(r.email || address.value.trim()); code.value = "";
+        clearInterval(timer); timer = setInterval(() => { controls(); if (!form.isConnected || Date.now() >= deadline) clearInterval(timer); },1000);
+        setTimeout(() => code.focus(),0);
+      } finally { pending = false; controls(); }
+    }
+    send.onclick = resend.onclick = sendCode;
+    change.onclick = () => { clearInterval(timer); challenge = null; deadline = 0; code.value = ""; message.textContent = ""; controls(); address.focus(); };
+    code.oninput = () => { code.value = code.value.replace(/[^0-9]/g, "").slice(0,6); };
+    form.onsubmit = async (event) => {
+      event.preventDefault(); if (!challenge) return sendCode();
+      if (pending || !code.reportValidity()) return;
+      pending = true; message.textContent = ""; controls();
+      try {
+        const r = await postJson("/api/auth/email/verify", {challengeId:challenge.challengeId,code:code.value});
+        if (!r.ok) { message.textContent = emailError(r.error); return; }
+        const target = new URL(r.redirect || "/account",location.origin);
+        if (target.origin !== location.origin || !["http:","https:"].includes(target.protocol)) { message.textContent = t("opFailed"); return; }
+        clearInterval(timer); location.assign(target.href);
+      } finally { pending = false; controls(); }
+    };
+    return form;
+  }
+  function renderStandaloneEmail() {
+    const host = $("#email-login-root"); if (!host) return;
+    if (S.status === "loading") return;
+    if (S.status === "failed") { const b = el("button", {type:"button",className:"button",textContent:t("retryLoad")}); b.onclick = bootstrap; return host.replaceChildren(b); }
+    host.replaceChildren(createEmailForm({intent:host.dataset.intent || "login",returnTo:host.dataset.returnTo || S.returnTo}));
+  }
+  function openLogin({ intent = "login", returnTo, identityId, email } = {}) {
     if (!dialog || typeof dialog.showModal !== "function") return location.assign(`/login?return_to=${encodeURIComponent(returnTo || S.returnTo)}`);
     if (returnTo) S.returnTo = returnTo;
-    dialog.dataset.intent = intent;
+    dialog.dataset.intent = intent; dialog.dataset.identityId = identityId || ""; dialog.dataset.email = email || "";
+    const emailIntent = intent === "bind" || intent === "reverify";
     $("#login-eyebrow").textContent = intent === "switch" ? t("switchAccount") : t("welcome");
-    $("#login-title").textContent = intent === "switch" ? t("switchTitle") : t("loginTitle");
-    const desc = $("#login-desc"); if (desc) desc.textContent = intent === "switch" ? t("switchDesc") : t("loginDesc");
+    $("#login-title").textContent = emailIntent ? t(intent === "bind" ? "bindEmail" : "reverifyEmail") : intent === "switch" ? t("switchTitle") : t("loginTitle");
+    const desc = $("#login-desc"); if (desc) desc.textContent = emailIntent ? t("emailSecurityDesc") : intent === "switch" ? t("switchDesc") : t("loginDesc");
     lastFocus = document.activeElement;
     renderLoginForms(intent);
     dialog.showModal();
-    (dialog.querySelector(".button-provider") || dialog.querySelector(".modal-close"))?.focus();
+    (dialog.querySelector("input:not(:disabled),button.button-provider:not(:disabled)") || dialog.querySelector(".modal-close"))?.focus();
   }
+
   dialog?.addEventListener("close", () => { if (lastFocus?.isConnected) lastFocus.focus(); });
   dialog?.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
   dialog?.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => dialog.close()));
@@ -326,36 +399,28 @@
       if (pending && !a.permanent && !S.plan?.beta) { const b = el("button", { className: "text-link", type: "button", textContent: t("continuePay") }); b.addEventListener("click", () => startPurchase(pending.plan_code)); root.append(b); }
     }).catch(() => {});
     // 身份
-    const names = { google: "Google", wechat: t("wechat"), dev: t("devAccount") }, chan = { mp: t("chanMp"), open: t("chanQr") };
-    const ids = S.user.identities, providersHeld = new Set(ids.map((i) => i.provider));
+    const names = { google: "Google", github: "GitHub", email: t("emailLabel"), dev: t("devAccount") };
+    const ids = S.user.identities || [], visibleIds = ids.filter((i) => i.provider !== "wechat");
+    const providersHeld = new Set(ids.map((i) => i.provider));
     const canRemove = ids.length > 1;
     const needVerify = () => toast(t("needVerify"), 6000);
     const list = el("ul", { className: "id-list" });
-    // 微信：扫码与公众号两个身份显示为一组，整组解绑；重新验证只能在对应渠道里做
-    const wx = ids.filter((i) => i.provider === "wechat");
-    if (wx.length) {
-      const li = el("li", {}, el("span", { textContent: `${t("wechat")} · ${wx.map((i) => `${chan[i.channel] || ""}${i.display_name ? " " + i.display_name : ""}`).join(" / ")}` }));
+    for (const i of visibleIds) {
+      const li = el("li", {}, el("span", { textContent: `${names[i.provider] || i.provider}${i.email || i.display_name ? " · " + (i.email || i.display_name) : ""}` }));
       const ops = el("div", { className: "ops" });
-      for (const i of wx) { const ok = !!S.providers?.wechat?.available && S.providers.wechat.mode === (i.channel === "mp" ? "mp" : "qr"); const b = el("button", { className: "text-link", type: "button", textContent: `${t("reverify")}（${chan[i.channel] || ""}）`, disabled: !ok }); b.addEventListener("click", busy(b, () => reverify(i.id))); ops.append(b); }
-      if (canRemove && ids.length > wx.length) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbindWechat") }); b.addEventListener("click", busy(b, () => unbind({ provider: "wechat" }, t("confirmUnbindWechat")))); ops.append(b); }
-      li.append(ops); list.append(li);
-    }
-    for (const i of ids.filter((i) => i.provider !== "wechat")) {
-      const li = el("li", {}, el("span", { textContent: `${names[i.provider] || i.provider}${i.display_name ? " · " + i.display_name : ""}` }));
-      const ops = el("div", { className: "ops" });
-      const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers?.[i.provider]?.available }); rv.addEventListener("click", busy(rv, () => reverify(i.id))); ops.append(rv);
+      const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers?.[i.provider]?.available });
+      rv.addEventListener("click", busy(rv, () => i.provider === "email" ? openLogin({intent:"reverify",identityId:i.id,email:i.email || "",returnTo:"/account"}) : reverify(i.id))); ops.append(rv);
       if (canRemove) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbind") }); b.addEventListener("click", busy(b, () => unbind({ identityId: i.id }, t("confirmUnbind")))); ops.append(b); }
       li.append(ops); list.append(li);
     }
     root.append(el("h3", { textContent: t("identitiesTitle") }), list);
     const bindRow = el("div", { className: "bind-row" });
-    for (const p of ["wechat", "google", "dev"]) {
-      if (!S.providers?.[p]?.available) continue;
-      if (p !== "wechat" && providersHeld.has(p)) continue;
-      if (p === "wechat" && wx.some((i) => i.channel === (S.providers.wechat.mode === "mp" ? "mp" : "open"))) continue;   // 当前渠道的微信身份已关联
+    for (const p of ["email", "google", "github", "dev"]) {
+      if (!S.providers?.[p]?.available || providersHeld.has(p)) continue;
       const b = el("button", { className: "button small", type: "button", textContent: t("bind") + names[p] });
       b.addEventListener("click", busy(b, async () => {
         if (!S.user.recentlyVerified) return needVerify();
+        if (p === "email") return openLogin({intent:"bind",returnTo:"/account"});
         const r = await postJson("/api/account/bind", { provider: p });
         if (r.ok && r.url) return location.assign(r.url);
         toast(r.error === "reverify_required" ? t("needVerifyShort") : r.error === "csrf" ? t("stale") : t("bindFailed"));

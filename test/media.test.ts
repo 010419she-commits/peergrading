@@ -234,7 +234,8 @@ test("设置：环境变量为缺省且不落盘，文件里的 Key 覆盖它；
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "media.json"), "utf8")).apiKey, "");
   s = saveMediaSettings(dir, { apiKey: "sk-saved-abcdefghij", baseUrl: "https://relay.example.com/v1/", videos: false, imageModel: "" });
   assert.equal(s.apiKey, "sk-saved-abcdefghij"); assert.equal(s.keySource, "file"); assert.equal(s.baseUrl, "https://relay.example.com/v1"); assert.equal(s.videos, false); assert.equal(s.imageModel, "gpt-image-1");
-  assert.equal((fs.statSync(path.join(dir, "media.json")).mode & 0o777), 0o600);
+  // Windows uses the user directory's ACL; POSIX mode bits apply only on Unix.
+  if (process.platform !== "win32") assert.equal((fs.statSync(path.join(dir, "media.json")).mode & 0o777), 0o600);
   const pub = publicMediaSettings(loadMediaSettings(dir));
   assert.equal(pub.configured, true); assert.equal(pub.keySource, "file"); assert.equal(pub.keyHint, "sk-sa…ghij"); assert.equal(JSON.stringify(pub).includes("sk-saved-abcdefghij"), false);
   const min = minimalMediaSettings(loadMediaSettings(dir));

@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import type { AgentInfo, RunnerSpec, Text } from "./types.ts";
 import { clipboardAvailable } from "./relay.ts";
+import { kimiAccountSummary } from "./kimi.ts";
 import { getProxyEnv, proxyEnvPrefix } from "./proxy.ts";
 import { WIN, POWERSHELL, findBin, spawnCli, killTree, quoteForDisplay, stripNestedClaudeEnv, resetLaunchers } from "./launch.ts";
 
@@ -285,6 +286,40 @@ function detectGemini(): AgentDraft | null {
     status: "unverified", icon: "G", runner: { type: "gemini-cli", bin, model: settings?.model?.name } };
 }
 
+/** Current TypeScript Kimi Code CLI; legacy Python kimi-cli does not share its safety flags. */
+export async function detectKimiCode(): Promise<AgentDraft | null> {
+  const candidates = [findBin("kimi"), path.join(HOME, ".local", "share", "peergrading-tools", "kimi-code", "bin", WIN ? "kimi.exe" : "kimi")];
+  let bin: string | undefined;
+  for (const p of candidates) {
+    if (!p) continue;
+    try { fs.accessSync(p, WIN ? fs.constants.F_OK : fs.constants.X_OK); bin = p; break; } catch {}
+  }
+  if (!bin) return null;
+  const info: AgentDraft = {
+    id: "kimi-code", kind: "cli", title: "Kimi Code CLI", icon: "K", local: false,
+    subtitle: L("Moonshot 云端 · 使用已登录的 Kimi Code 账号", "Moonshot cloud · uses your signed-in Kimi Code account"),
+    model: L("默认模型", "Default model"), status: "unverified", runner: { type: "kimi-code", bin },
+  };
+  // A help-only capability check never sends a model request or imports workspace config.
+  const help = await run(bin, ["--help"], "", 15_000);
+  if (help.code !== 0 || !["--agent-file", "--add-dir", "--prompt", "--output-format"].every((f) => help.stdout.includes(f))) {
+    info.status = "error";
+    info.statusDetail = L("需要新版 Kimi Code CLI 2.x；旧版 Python kimi-cli 不支持本应用的受限工具模式", "Kimi Code CLI 2.x is required; legacy Python kimi-cli does not support the restricted tool profile");
+    return info;
+  }
+  try {
+    const account = await kimiAccountSummary();
+    info.model = account.model;
+    info.status = account.ready ? "ready" : "not_logged_in";
+    if (!account.ready) info.statusDetail = L("Kimi Code 尚未登录，请先在终端完成授权", "Sign in to Kimi Code in your terminal first");
+  } catch (e: any) {
+    info.status = "not_logged_in";
+    info.statusDetail = String(e?.message ?? "Kimi Code 配置无效");
+  }
+  if (info.status !== "ready") info.hintCommand = L(`${quoteForDisplay(bin)} login`, `${quoteForDisplay(bin)} login`);
+  return info;
+}
+
 /** 列出目录里的子目录名（不存在则为空） */
 function subdirs(dir: string): string[] {
   try { return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { return []; }
@@ -509,7 +544,6 @@ function detectDesktopApps(): AgentDraft[] {
 
 /** 其他命令行 agent：按可执行文件存在与否列出；调用参数取自各自文档，标为实验性 */
 const GENERIC_CLIS: { bin: string; title: string; zh: string; en: string; icon: string; args: string[]; promptVia: "stdin" | "arg"; parse: "jsonl" | "text" }[] = [
-  { bin: "kimi", title: "Kimi Code CLI", zh: "Moonshot 云端 · 命令行（实验性）", en: "Moonshot cloud · CLI (experimental)", icon: "K", args: ["--print"], promptVia: "stdin", parse: "text" },
   { bin: "opencode", title: "OpenCode", zh: "命令行（实验性）", en: "CLI (experimental)", icon: "O", args: ["run"], promptVia: "arg", parse: "text" },
   { bin: "cursor-agent", title: "Cursor Agent CLI", zh: "命令行（实验性）", en: "CLI (experimental)", icon: "▸", args: ["-p", "--output-format", "text"], promptVia: "arg", parse: "text" },
   { bin: "copilot", title: "GitHub Copilot CLI", zh: "命令行（实验性）", en: "CLI (experimental)", icon: "V", args: ["-p"], promptVia: "arg", parse: "text" },
@@ -549,14 +583,15 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
   if (refresh) resetLaunchers();   // CLI 升级后包装脚本背后的目标可能变了
   inflight = (async () => {
     const qwenBin = findBin("qwen");
-    const [claude, qwen, cdx, kimiApi, lm, ollama] = await Promise.all([
-      detectClaudeCode(), detectQwenCloud(), detectCodex(), detectKimiApi(),
+    const [claude, qwen, cdx, kimiCode, kimiApi, lm, ollama] = await Promise.all([
+      detectClaudeCode(), detectQwenCloud(), detectCodex(), detectKimiCode(), detectKimiApi(),
       SCAN_MODELS ? detectLmStudio() : Promise.resolve(null), SCAN_MODELS ? detectOllama() : Promise.resolve(null),
     ]);
     const agents: AgentInfo[] = [] as any;
     if (claude) agents.push(claude as AgentInfo);
     if (cdx) agents.push(cdx);
     if (qwen) agents.push(qwen);
+    if (kimiCode) agents.push(kimiCode);
     if (kimiApi) agents.push(kimiApi);
     const gem = detectGemini(); if (gem) agents.push(gem);
     agents.push(...detectGenericClis());
@@ -569,7 +604,7 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
     agents.push(...relayEntries());
     for (const a of agents) {
       a.auto = a.kind !== "relay";
-      a.repository = a.kind === "cli" && (a.runner.type === "claude-code" || a.runner.type === "codex");
+      a.repository = a.kind === "cli" && (a.runner.type === "claude-code" || a.runner.type === "codex" || a.runner.type === "kimi-code");
     }
     // 全自动的排前面
     agents.sort((x, y) => Number(y.auto) - Number(x.auto));
@@ -601,6 +636,7 @@ export async function loginCommandFor(id: string): Promise<LoginCommand | null> 
   }
   if (a.runner.type === "qwen-code") return mk([a.runner.bin], false, "follow_prompt");
   if (a.runner.type === "codex") return mk([a.runner.bin, "login"], true, "none");
+  if (a.runner.type === "kimi-code") return mk([a.runner.bin, "login"], false, "none");
   if (a.runner.type === "generic") return mk([a.runner.bin], false, "follow_prompt");
   return null;
 }

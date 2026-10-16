@@ -277,8 +277,8 @@ export async function runCollaboration(
 /** Repository mode shares a task worktree and hands write access to one author at a time. */
 async function runRepositoryCollaboration(cfg: RunConfig, emit: Emit, signal: AbortSignal, backends?: { A: Backend; B: Backend }): Promise<RunResult> {
   for (const agent of [cfg.agentA, cfg.agentB]) {
-    if (agent.agent.kind !== "cli" || !["claude-code", "codex"].includes(agent.agent.runner.type)) {
-      throw new Error("仓库协作必须为两位 Agent 选择 Claude Code 或 Codex 命令行；API、桌面中转与其他 CLI 暂不支持文件工具");
+    if (agent.agent.kind !== "cli" || !["claude-code", "codex", "kimi-code"].includes(agent.agent.runner.type)) {
+      throw new Error("仓库协作必须为两位 Agent 选择 Kimi Code、Codex 或 Claude Code 命令行；API、桌面中转与其他 CLI 暂不支持文件工具");
     }
   }
   if (cfg.media) throw new Error("仓库协作模式暂不支持媒体生成，请使用文字协作模式生成图片或视频");

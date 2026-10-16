@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS browser_auth_state (
 CREATE TABLE IF NOT EXISTS identities (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider      TEXT NOT NULL CHECK (provider IN ('google','wechat','dev')),
+  provider      TEXT NOT NULL CHECK (provider IN ('google','wechat','dev','email','github')),
   issuer        TEXT NOT NULL,
   provider_uid  TEXT NOT NULL,
   channel       TEXT,
@@ -163,6 +163,25 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   revoked_at   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
+CREATE TABLE IF NOT EXISTS email_challenges (
+  id             TEXT PRIMARY KEY,
+  context        TEXT NOT NULL CHECK (context IN ('web','device')),
+  email          TEXT NOT NULL,
+  code_mac       TEXT NOT NULL,
+  transaction_id TEXT,
+  device_code    TEXT,
+  created_at     INTEGER NOT NULL,
+  expires_at     INTEGER NOT NULL,
+  sent_at        INTEGER,
+  consumed_at    INTEGER,
+  attempts       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_email_challenges_email ON email_challenges(email, created_at);
+CREATE TABLE IF NOT EXISTS email_auth_limits (
+  key        TEXT PRIMARY KEY,
+  count      INTEGER NOT NULL,
+  reset_at   INTEGER NOT NULL
+);
 -- 试用用量：每次开始协作记一条
 CREATE TABLE IF NOT EXISTS usage_events (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,4 +218,27 @@ db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(refe
 // Desktop browser approval may return only to a fixed loopback callback, never with a device token.
 for (const column of ["loopback_return_url", "loopback_state"]) {
   if (!(db.prepare("PRAGMA table_info(device_codes)").all() as any[]).some((c) => c.name === column)) db.exec(`ALTER TABLE device_codes ADD COLUMN ${column} TEXT`);
+}
+// SQLite cannot alter CHECK constraints. Preserve identity IDs because sessions and OAuth
+// transactions refer to them, and retain every historical Google/WeChat identity and user.
+const identitySchema = String(q("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'identities'").get()?.sql || "");
+if (!identitySchema.includes("'email'") || !identitySchema.includes("'github'")) {
+  transaction(() => {
+    const sequence = q("SELECT seq FROM sqlite_sequence WHERE name = 'identities'").get()?.seq || 0;
+    db.exec(`CREATE TABLE identities_auth_upgrade (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL CHECK (provider IN ('google','wechat','dev','email','github')),
+      issuer TEXT NOT NULL, provider_uid TEXT NOT NULL, channel TEXT, union_id TEXT,
+      display_name TEXT, avatar_url TEXT, link_version INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()), last_login_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      UNIQUE(provider, issuer, provider_uid)
+    );
+    INSERT INTO identities_auth_upgrade SELECT * FROM identities;
+    DROP TABLE identities;
+    ALTER TABLE identities_auth_upgrade RENAME TO identities;
+    CREATE INDEX idx_identities_user ON identities(user_id);`);
+    q("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'identities'").run(sequence);
+    if (q("PRAGMA foreign_key_check").all().length) throw new Error("Identity migration failed foreign-key validation");
+  });
 }

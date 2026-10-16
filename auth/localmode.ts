@@ -52,6 +52,9 @@ type PairStatus = "none" | "pending" | "approved" | "expired" | "denied" | "cons
 let pending: Pending | null = null;
 let completedCallback: { state: string; expiresAt: number; status: PairStatus } | null = null;
 let lastStatus: PairStatus = "none", lastError = "";
+let publicAuthCache: { origin: string; expires: number; providers: any; plan: any } | null = null;
+let emailSendGeneration = 0;
+let emailSending = false;
 let polling: Promise<PairStatus> | null = null;
 let starting: Promise<any> | null = null;
 const save = () => { if (state) writePrivate(stateFile, state); else try { fs.unlinkSync(stateFile); } catch {} };
@@ -178,16 +181,38 @@ export async function reportUsage(ref: string, expectedUserId?: number) {
 }
 
 export const local = Router();
+async function publicAuth() {
+  const origin = getCloudUrl();
+  if (publicAuthCache?.origin === origin && publicAuthCache.expires > Date.now()) return publicAuthCache;
+  const providers: any = {
+    google: { available: false }, github: { available: false, hint: "GitHub 登录尚未配置" },
+    email: { available: false, hint: "邮箱登录尚未配置邮件发送服务" },
+  };
+  let plan = state?.plan ?? null;
+  try {
+    const response = await cloud("/api/auth/bootstrap");
+    if (response.ok) {
+      for (const name of ["google", "github", "email"]) {
+        const provider = response.body.providers?.[name];
+        if (provider) providers[name] = { available: provider.available === true, ...(typeof provider.hint === "string" ? { hint: provider.hint.slice(0, 240) } : {}) };
+      }
+      plan = response.body.plan ?? plan;
+    }
+  } catch {}
+  publicAuthCache = { origin, expires: Date.now() + 60_000, providers, plan };
+  return publicAuthCache;
+}
 local.get("/api/auth/bootstrap", async (req, res) => {
   const request = req as any;
   ensureBrowser(req, res);
   await refreshMe();
   const user = cachedUser();
+  const available = await publicAuth();
   res.json({
     status: user ? "authenticated" : "anonymous", localMode: true, cloudUrl: getCloudUrl(), cloudDefault: DEFAULT_CLOUD,
     paired: isPaired(), lastError, pairing: pairingView(),
     user: user ? { id: user.id, name: user.display_name, avatar: user.avatar_url, createdAt: user.created_at, access: user.access, entitlements: user.entitlements } : null,
-    providers: {}, plan: state?.plan ?? null,
+    providers: available.providers, plan: state?.plan ?? available.plan,
     csrf: issueCsrf({ bidHash: request.bidHash, sessionId: null, authEpoch: request.authEpoch }),
   });
 });
@@ -198,8 +223,52 @@ function callbackFor(req: Request) {
 }
 local.post(["/api/local/auth/start", "/api/local/pair/start"], requireBrowser, requireCsrf, async (req, res) => {
   if (isPaired()) return res.status(409).json({ error: "already_authenticated" });
-  try { res.json(await startPairing(req.path === "/api/local/auth/start" ? callbackFor(req) : undefined)); }
+  const provider = req.body?.provider;
+  if (provider != null && !["google", "github"].includes(provider)) return res.status(400).json({ error: "bad_request" });
+  try {
+    const result = await startPairing(req.path === "/api/local/auth/start" ? callbackFor(req) : undefined);
+    if (provider && pending) {
+      const url = new URL(pending.verificationUrl); url.hash = provider; pending.verificationUrl = url.href; result.verificationUrl = url.href;
+    }
+    res.json(result);
+  }
   catch (error: any) { lastError = String(error?.message || "无法发起登录"); res.status(502).json({ error: lastError }); }
+});
+local.post("/api/local/auth/email/start", requireBrowser, requireCsrf, async (req, res) => {
+  if (isPaired()) return res.status(409).json({ error: "already_authenticated" });
+  if (emailSending) return res.status(409).json({ error: "email_request_pending" });
+  emailSending = true;
+  const sendGeneration = ++emailSendGeneration;
+  try {
+    if (!pending || Date.now() >= pending.expiresAt) await startPairing();
+    const request = pending, generation = authGeneration;
+    if (!request) return res.status(409).json({ error: "code_unusable" });
+    const response = await cloud("/api/device/email/start", { method: "POST", body: JSON.stringify({ deviceCode: request.deviceCode, email: req.body?.email }) });
+    if (pending !== request || generation !== authGeneration || sendGeneration !== emailSendGeneration) return res.status(409).json({ error: "account_changed" });
+    if (!response.ok) return res.status(response.status).json({ error: typeof response.body?.error === "string" ? response.body.error : "mail_delivery_failed" });
+    const body = response.body;
+    if (!/^[A-Za-z0-9_-]{16,128}$/.test(body.challengeId) || !Number.isFinite(body.expiresIn) || body.expiresIn <= 0 || body.expiresIn > 600 || typeof body.email !== "string") return res.status(502).json({ error: "mail_delivery_failed" });
+    res.json({ challengeId: body.challengeId, expiresIn: body.expiresIn, resendAfter: Number.isFinite(body.resendAfter) ? Math.max(0, Math.min(600, body.resendAfter)) : 60, email: body.email });
+  } catch { res.status(502).json({ error: "mail_delivery_failed" }); }
+  finally { emailSending = false; }
+});
+local.post("/api/local/auth/email/verify", requireBrowser, requireCsrf, async (req, res) => {
+  if (isPaired()) return res.status(409).json({ error: "already_authenticated" });
+  const request = pending, generation = authGeneration;
+  if (!request || Date.now() >= request.expiresAt) return res.status(410).json({ error: "code_expired" });
+  try {
+    const response = await cloud("/api/device/email/verify", { method: "POST", body: JSON.stringify({ deviceCode: request.deviceCode, challengeId: req.body?.challengeId, code: req.body?.code }) });
+    if (pending !== request || generation !== authGeneration) return res.status(409).json({ error: "account_changed" });
+    if (!response.ok) return res.status(response.status).json(response.body);
+    let status = await pollPairing(true);
+    if (generation !== authGeneration) return res.status(409).json({ error: "account_changed" });
+    if (status === "pending") {
+      if (pending !== request) return res.status(409).json({ error: "account_changed" });
+      status = await pollPairing(true);
+      if (generation !== authGeneration) return res.status(409).json({ error: "account_changed" });
+    }
+    res.json({ ok: true, status, paired: isPaired() });
+  } catch { res.status(502).json({ error: "account_service_unavailable" }); }
 });
 local.get(["/api/local/auth/status", "/api/local/pair/status"], requireBrowser, async (_req, res) => {
   await pollPairing(); res.json(pairingView());

@@ -30,6 +30,18 @@ export const config = {
   sessionSecret,
   dbPath: path.join(dataDir, "app.db"),
   google: { clientId: process.env.GOOGLE_CLIENT_ID || "", clientSecret: process.env.GOOGLE_CLIENT_SECRET || "" },
+  email: {
+    provider: process.env.EMAIL_PROVIDER || "",
+    from: process.env.EMAIL_FROM || "",
+    smtp: {
+      host: process.env.SMTP_HOST || "", port: Number(process.env.SMTP_PORT || 465),
+      secure: process.env.SMTP_SECURE === undefined ? Number(process.env.SMTP_PORT || 465) === 465 : process.env.SMTP_SECURE === "true",
+      user: process.env.SMTP_USER || "", pass: process.env.SMTP_PASS || "",
+    },
+    resendKey: process.env.RESEND_API_KEY || "",
+    // Explicit, isolated development testing only. Never creates a production login bypass.
+    testOutboxDir: !isProd && process.env.NODE_ENV === "test" ? process.env.EMAIL_TEST_OUTBOX_DIR || "" : "",
+  },
   /** 微信登录：open = 开放平台「网站应用」扫码登录（必填项）；mp = 公众号（微信内置浏览器里登录，可选） */
   wechat: {
     open: { appId: process.env.WECHAT_OPEN_APPID || "", secret: process.env.WECHAT_OPEN_SECRET || "", unionDomain: process.env.WECHAT_OPEN_UNION_DOMAIN || "" },
@@ -77,5 +89,6 @@ export const config = {
 };
 
 export const googleReady = () => !!(config.google.clientId && config.google.clientSecret);
-export const wechatOpenReady = () => !!(config.wechat.open.appId && config.wechat.open.secret);
-export const wechatMpReady = () => !!(config.wechat.mp.appId && config.wechat.mp.secret);
+// Historical identities and payment configuration are retained; WeChat authentication is retired.
+export const wechatOpenReady = () => false;
+export const wechatMpReady = () => false;

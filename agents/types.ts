@@ -31,6 +31,7 @@ export type RunnerSpec =
   | { type: "qwen-code"; bin: string; model?: string; openai?: { baseUrl: string; apiKey: string } }
   | { type: "gemini-cli"; bin: string; model?: string }
   | { type: "codex"; bin: string; model?: string }
+  | { type: "kimi-code"; bin: string; model?: string }
   | { type: "openai"; baseUrl: string; apiKey: string; model: string }
   | { type: "anthropic"; model: string; effort: string }
   | { type: "relay"; mode: "manual" | "clipboard"; app?: string }

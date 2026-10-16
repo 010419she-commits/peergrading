@@ -1,15 +1,17 @@
 // auth/users.ts — 身份归属 / 绑定 / 解绑（v9 §5.9）
 import { q } from "./db.ts";
 import { now, AuthError } from "./security.ts";
+import { config, googleReady } from "./config.ts";
+import { emailReady } from "./mail.ts";
 
 export interface VerifiedIdentity {
-  provider: "google" | "wechat" | "dev"; issuer: string; uid: string; channel?: string | null;
+  provider: "google" | "wechat" | "dev" | "email" | "github"; issuer: string; uid: string; channel?: string | null;
   unionId?: string | null; unionDomain?: string | null; name?: string | null; avatar?: string | null;
 }
 
 export const getUser = (id: number) => q("SELECT * FROM users WHERE id = ?").get(id) || null;
 export const listIdentities = (userId: number) =>
-  q("SELECT id, provider, channel, display_name, avatar_url, created_at, last_login_at FROM identities WHERE user_id = ? ORDER BY id").all(userId);
+  q("SELECT id, provider, channel, display_name, avatar_url, created_at, last_login_at, CASE WHEN provider = 'email' THEN provider_uid ELSE NULL END AS email FROM identities WHERE user_id = ? ORDER BY id").all(userId);
 export const getIdentity = (id: number) => q("SELECT * FROM identities WHERE id = ?").get(id) || null;
 
 const findIdentity = (p: VerifiedIdentity) => q("SELECT * FROM identities WHERE provider = ? AND issuer = ? AND provider_uid = ?").get(p.provider, p.issuer, p.uid);
@@ -91,7 +93,12 @@ export function removeIdentities(userId: number, { provider, identityId }: { pro
     removing = [one];
   }
   if (!removing.length) throw new AuthError("not_found");
-  if (all.length - removing.length < 1) throw new AuthError("last_identity");
+  const usable = (identity: any) => identity.provider === "google" ? googleReady()
+    : identity.provider === "email" ? emailReady()
+    : identity.provider === "github" ? !!(process.env.GITHUB_CLIENT_ID?.trim() && process.env.GITHUB_CLIENT_SECRET?.trim())
+    : identity.provider === "dev" && config.devLogin;
+  // A retired WeChat identity cannot be the only remaining path back into an account.
+  if (!all.some((identity) => !removing.some((item) => item.id === identity.id) && usable(identity))) throw new AuthError("last_identity");
   const del = q("DELETE FROM identities WHERE id = ? AND user_id = ?");
   for (const r of removing) del.run(r.id, userId);
   if (provider === "wechat") q("DELETE FROM wechat_union_links WHERE user_id = ?").run(userId);

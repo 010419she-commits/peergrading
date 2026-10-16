@@ -236,7 +236,7 @@ async function buildConfig(raw: any, cwd: string, sessionDir: string): Promise<R
   let repository: RunConfig["repository"];
   if (raw?.mode === "repository") {
     if (!repositoriesAvailable) throw new Error("repository_local_only");
-    if (![agentA, agentB].every((a) => ["claude-code", "codex"].includes(a.agent.runner.type))) throw new Error("repository_agents_required");
+    if (![agentA, agentB].every((a) => ["claude-code", "codex", "kimi-code"].includes(a.agent.runner.type))) throw new Error("repository_agents_required");
     const info = await inspectRepository(String(raw.repository?.path || ""));
     if (info.dirty) throw new Error("repository_dirty");
     repository = { path: info.path, sessionDir, checks: parseCheckCommands(raw.repository?.testCommands) };

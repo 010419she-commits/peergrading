@@ -1,5 +1,6 @@
 // agents/backends.ts — 把不同来源的模型统一成 Backend.chat()
 import Anthropic from "@anthropic-ai/sdk";
+import { prepareKimiLaunch, type KimiLaunchFiles } from "./kimi.ts";
 import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from "./types.ts";
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
@@ -41,6 +42,8 @@ function parseLine(line: string): ParsedLine | null {
   if (!line.startsWith("{")) return null;
   let d: any; try { d = JSON.parse(line); } catch { return null; }
   const out: ParsedLine = {};
+  // Current Kimi Code JSONL uses role/content records, with tool progress kept separate.
+  if (d.role === "assistant" && typeof d.content === "string") return { assistantText: d.content };
   switch (d.type) {
     case "stream_event": {
       const e = d.event;
@@ -73,7 +76,16 @@ function parseLine(line: string): ParsedLine | null {
   }
 }
 
-export function buildCliArgs(spec: RunnerSpec, system: string, prompt: string, repositoryAccess?: ChatRequest["repositoryAccess"]): { args: string[]; useStdin: boolean; prefixSystem: boolean; textMode: boolean } {
+export function buildCliArgs(spec: RunnerSpec, system: string, prompt: string, repositoryAccess?: ChatRequest["repositoryAccess"], kimi?: KimiLaunchFiles): { args: string[]; useStdin: boolean; prefixSystem: boolean; textMode: boolean } {
+  if (spec.type === "kimi-code") {
+    if (!kimi) throw new Error("Kimi Code 需要独立的受限工具配置，不能使用默认工具启动");
+    return { useStdin: false, prefixSystem: false, textMode: false, args: [
+      "--agent-file", kimi.agentFile, "--skills-dir", kimi.skillsDir,
+      "--output-format", "stream-json", ...(kimi.repositoryDir ? ["--add-dir", kimi.repositoryDir] : []),
+      ...(spec.model ? ["--model", spec.model] : []),
+      "--prompt", "Complete the task in your agent instructions. Reply to the latest message. Do not resume or create other tasks.",
+    ] };
+  }
   if (repositoryAccess) {
     if (spec.type === "claude-code") {
       return { useStdin: true, prefixSystem: false, textMode: false, args: [
@@ -90,7 +102,7 @@ export function buildCliArgs(spec: RunnerSpec, system: string, prompt: string, r
       "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true", "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
       ...(spec.model ? ["-m", spec.model] : []), "-",
     ] };
-    throw new Error("仓库协作只支持 Claude Code 或 Codex 命令行，所选后端无法安全执行文件操作");
+    throw new Error("仓库协作只支持 Claude Code、Codex 或 Kimi Code 命令行，所选后端无法安全执行文件操作");
   }
   switch (spec.type) {
     case "generic":
@@ -120,14 +132,17 @@ class CliBackend implements Backend {
   spec: RunnerSpec;
   constructor(spec: RunnerSpec) { this.spec = spec; }
 
-  chat(req: ChatRequest): Promise<ChatResult> {
-    try { assertActive(req.signal); } catch (e) { return Promise.reject(e); }
+  async chat(req: ChatRequest): Promise<ChatResult> {
+    assertActive(req.signal);
     let input = renderTranscript(req.turns, req.lang);
     const prefixed = `[System instructions]\n${req.system}\n\n${input}`;
     const bin = (this.spec as any).bin as string;
     // 只有退回 cmd.exe 启动的 .cmd 包装脚本才无法安全传递含换行/引号的长参数：那时系统提示词改从 stdin 前置
     const viaShell = launcherFor(bin).shell;
-    let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed, req.repositoryAccess);
+    const kimi = this.spec.type === "kimi-code" ? await prepareKimiLaunch(req, process.env, this.spec.model) : undefined;
+    try {
+    assertActive(req.signal);
+    let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed, req.repositoryAccess, kimi);
     if (viaShell) {
       const i = args.indexOf("--system-prompt"); if (i >= 0) args.splice(i, 2);
       prefixSystem = true;
@@ -139,10 +154,12 @@ class CliBackend implements Backend {
     if (promptInArgs && viaShell) return Promise.reject(new Error(`${this.spec.type}: 这个工具在 Windows 上通过 .cmd 脚本启动，无法把提示词作为参数传入；请改用它的 .exe 安装方式`));
     if (promptInArgs && WIN && [bin, ...args].reduce((n, a) => n + a.length + 3, 0) > 32_000) return Promise.reject(new Error(`${this.spec.type}: 对话记录太长，超出了 Windows 命令行参数的长度上限，请新开一轮协作`));
 
-    return new Promise((resolve, reject) => {
+    return await new Promise<ChatResult>((resolve, reject) => {
+      const cwd = kimi?.cwd ?? req.cwd;
+      const env = kimi?.env ?? cleanEnv();
       const child = req.repositoryAccess
-        ? spawnRepositoryProcess(bin, args, req.cwd, repositoryEnv(cleanEnv()))
-        : spawnCli(bin, args, { env: cleanEnv(), cwd: req.cwd });
+        ? spawnRepositoryProcess(bin, args, cwd, repositoryEnv(env))
+        : spawnCli(bin, args, { env, cwd });
       child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
       let buf = "", streamed = "", assistantText = "", result: string | undefined, model: string | undefined, stderr = "";
       let usage: { input: number; output: number } | undefined;
@@ -204,6 +221,7 @@ class CliBackend implements Backend {
       });
       if (useStdin) child.stdin.end(input); else child.stdin.end();
     });
+    } finally { await kimi?.cleanup(); }
   }
 }
 
