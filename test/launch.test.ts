@@ -20,7 +20,7 @@ const PNPM_SHIM = (rel: string) => `@SETLOCAL\r\n@IF EXIST "%~dp0\\node.exe" (\r
 
 function touch(p: string, content = "") { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, content); }
 
-let npm: string, hoisted: string, legacy: string, broken: string, pnpmHome: string;
+let npm: string, hoisted: string, legacy: string, broken: string, pnpmHome: string, yarnBin: string;
 
 before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pg-launch-"));
@@ -70,6 +70,24 @@ before(async () => {
   pnpmHome = path.join(tmp, "pnpm");
   touch(path.join(pnpmHome, "bin", "gemini.cmd"), PNPM_SHIM("..\\global\\5\\.pnpm\\@google+gemini-cli@1.0.0\\node_modules\\@google\\gemini-cli\\dist\\index.js"));
   touch(path.join(pnpmHome, "global", "5", ".pnpm", "@google+gemini-cli@1.0.0", "node_modules", "@google", "gemini-cli", "dist", "index.js"), "// cli\n");
+
+  // yarn classic 全局安装：%LOCALAPPDATA%\Yarn\bin\x.cmd 只是转调 Data\global\node_modules\.bin\x.cmd（global.js updateBins 用 cmd-shim 再包一层）
+  yarnBin = path.join(tmp, "Yarn", "bin");
+  const yarnNm = path.join(tmp, "Yarn", "Data", "global", "node_modules");
+  touch(path.join(yarnBin, "codex"), "#!/bin/sh\n");
+  touch(path.join(yarnBin, "codex.cmd"), `@"%~dp0\\..\\Data\\global\\node_modules\\.bin\\codex.cmd"   %*\r\n`);
+  touch(path.join(yarnNm, ".bin", "codex"), "#!/bin/sh\nexec node ...\n");
+  touch(path.join(yarnNm, ".bin", "codex.cmd"), PNPM_SHIM("..\\@openai\\codex\\bin\\codex.js"));
+  touch(path.join(yarnNm, "@openai", "codex", "bin", "codex.js"), "// launcher\n");
+  touch(path.join(yarnNm, "@openai", "codex", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe"), "MZ");
+  // 外层包装脚本指向 sh 脚本（而不是 .cmd）→ node 跑不了，退回 cmd.exe
+  touch(path.join(yarnBin, "gemini.cmd"), `@"%~dp0\\..\\Data\\global\\node_modules\\.bin\\gemini"   %*\r\n`);
+  touch(path.join(yarnNm, ".bin", "gemini"), "#!/bin/sh\nexec node ...\n");
+  // 自己调自己的 .cmd：链解析不了 → 退回 cmd.exe
+  touch(path.join(yarnBin, "loop.cmd"), `@"%~dp0\\loop.cmd"   %*\r\n`);
+  // npm 的 postinstall 没跑：包装脚本指向的 .exe 只是占位脚本 → 退回 cmd.exe（让它自己的报错显示出来）
+  touch(path.join(npm, "stub.cmd"), NPM_SHIM("node_modules\\stub-tool\\bin\\stub.exe"));
+  touch(path.join(npm, "node_modules", "stub-tool", "bin", "stub.exe"), "#!/bin/sh\necho 'run node install.cjs'\n");
 
   Object.defineProperty(process, "platform", { value: "win32", configurable: true });
   process.env.PATH = [winApps, npm, local, path.join(pnpmHome, "bin")].join(path.delimiter);
@@ -157,6 +175,24 @@ test("包装脚本直接指向 .exe 时直接运行该 .exe", () => {
   assert.equal(l.shell, false);
   assert.ok(l.file.endsWith("native.exe"), `got ${l.file}`);
   assert.deepEqual(l.prefix, []);
+});
+
+test("yarn global 的两层 .cmd 包装：顺着链找到真正的脚本 / 原生二进制，不把 .cmd 交给 node", () => {
+  const l = launch.launcherFor(path.join(yarnBin, "codex.cmd"));
+  assert.equal(l.shell, false);
+  assert.ok(l.file.endsWith(path.join(PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe")), `got ${JSON.stringify(l)}`);
+  for (const p of [l.file, ...l.prefix]) assert.ok(!/\.(cmd|bat)$/i.test(p), `batch file handed to node: ${p}`);
+});
+
+test("包装脚本指向 sh 脚本或自己调自己时退回 cmd.exe", () => {
+  assert.equal(launch.launcherFor(path.join(yarnBin, "gemini.cmd")).shell, true);
+  assert.equal(launch.launcherFor(path.join(yarnBin, "loop.cmd")).shell, true);
+});
+
+test("包装脚本指向的 .exe 只是占位脚本时退回 cmd.exe", () => {
+  const l = launch.launcherFor(launch.findBin("stub")!);
+  assert.equal(l.shell, true);
+  assert.ok(l.file.endsWith("stub.cmd"), `got ${l.file}`);
 });
 
 test("非 npm 生成的 .cmd 退回 cmd.exe，参数按 cmd 规则加引号", () => {

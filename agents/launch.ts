@@ -115,8 +115,17 @@ export function parseNpmShim(cmdFile: string): string | null {
   }
   return null;
 }
-/** 包装脚本的目标是不是原生可执行文件（否则当作 node 脚本运行） */
+/** 包装脚本的目标是不是原生可执行文件 */
 const isNativeTarget = (p: string) => /\.(exe|com)$/i.test(p);
+/** 包装脚本的目标能不能交给 node 运行：.js/.cjs/.mjs，或没有扩展名但 shebang 是 node（yarn 的 .bin\x 是 #!/bin/sh 脚本，不能） */
+function isNodeScript(p: string): boolean {
+  if (/\.[cm]?js$/i.test(p)) return true;
+  if (/\.[a-z0-9]{1,4}$/i.test(p)) return false;
+  try {
+    const fd = fs.openSync(p, "r");
+    try { const b = Buffer.alloc(200); const n = fs.readSync(fd, b, 0, 200, 0); const first = b.toString("latin1", 0, n).split(/\r?\n/)[0]; return !first.startsWith("#!") || /\bnode\b/.test(first); } finally { fs.closeSync(fd); }
+  } catch { return false; }
+}
 
 /** 文件是不是真的 Windows 可执行文件（PE 头 "MZ"）；npm 的 postinstall 没跑时，占位的 .exe 其实是脚本 */
 function isPE(file: string): boolean {
@@ -161,14 +170,16 @@ export function launcherFor(bin: string): Launcher {
   const hit = launcherCache.get(bin); if (hit) return hit;
   let l: Launcher = { file: bin, prefix: [], shell: false };
   if (needsShell(bin)) {
-    const target = parseNpmShim(bin);
-    if (target && isNativeTarget(target)) l = { file: target, prefix: [], shell: false };
-    else {
-      const native = target ? vendoredNative(target) : null;
+    // yarn global 的 bin\x.cmd 只是再调一层 Data\global\node_modules\.bin\x.cmd：顺着链找真正的目标（最多 3 层）；链解析不了就退回 cmd.exe，它能原样运行嵌套的 .cmd
+    let target = parseNpmShim(bin);
+    for (let i = 0; target && /\.(cmd|bat)$/i.test(target); i++) target = i < 3 ? parseNpmShim(target) : null;
+    const viaCmd: Launcher = { file: bin, prefix: [], shell: true };
+    if (target && isNativeTarget(target)) l = isPE(target) ? { file: target, prefix: [], shell: false } : viaCmd;   // npm 的 postinstall 没跑时 .exe 只是占位脚本：交给 cmd.exe，让它自己的报错显示出来
+    else if (target && isNodeScript(target)) {
+      const native = vendoredNative(target);
       if (native) l = { file: native, prefix: [], shell: false };
-      else if (target) { const n = nodeFor(bin); l = { file: n.file, prefix: [target], shell: false, env: n.env }; }
-      else l = { file: bin, prefix: [], shell: true };
-    }
+      else { const n = nodeFor(bin); l = { file: n.file, prefix: [target], shell: false, env: n.env }; }
+    } else l = viaCmd;
   }
   launcherCache.set(bin, l);
   return l;
@@ -199,9 +210,14 @@ export function spawnCli(bin: string, args: string[], opts: { env: NodeJS.Proces
 }
 
 /** 结束子进程及其子孙（Windows 上 cmd.exe / node 包装层下面还有真正的 agent 进程） */
+const TASKKILL = WIN ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe") : "taskkill";
 export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
   if (!child.pid) return;
-  if (WIN) { execFile("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }, () => {}); return; }
+  if (WIN) {
+    // 用完整路径，PATH 坏掉时也能杀；taskkill 失败至少把直接子进程杀掉
+    execFile(TASKKILL, ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true }, (err) => { if (err) { try { child.kill("SIGKILL"); } catch {} } });
+    return;
+  }
   child.kill(signal);
 }
 

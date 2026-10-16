@@ -35,11 +35,13 @@ $o | ConvertTo-Json -Compress -Depth 3`;
     data = JSON.parse(out);
   } catch { return; }
   const user = data?.[USER] || {}, machine = data?.[MACHINE] || {};
-  // 变量表：当前进程的 → 注册表系统级 → 注册表用户级（后者覆盖前者），键名不分大小写
+  // 变量表：注册表系统级 → 当前进程的 → 注册表用户级（后者覆盖前者），键名不分大小写。
+  // 系统级不能压过当前进程：HKLM 里 USERNAME 永远是 SYSTEM，登录时才被换成真实用户名
   const vars = new Map();
-  for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") vars.set(k.toUpperCase(), v);
   const isPath = (k) => /^path$/i.test(k);
-  for (const src of [machine, user]) for (const [k, v] of Object.entries(src)) if (!isPath(k) && typeof v === "string") vars.set(k.toUpperCase(), v);
+  for (const [k, v] of Object.entries(machine)) if (!isPath(k) && typeof v === "string") vars.set(k.toUpperCase(), v);
+  for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") vars.set(k.toUpperCase(), v);
+  for (const [k, v] of Object.entries(user)) if (!isPath(k) && typeof v === "string") vars.set(k.toUpperCase(), v);
   const expand = (s) => { for (let i = 0; i < 3 && /%[^%;]+%/.test(s); i++) s = s.replace(/%([^%;]+)%/g, (m, k) => vars.get(k.toUpperCase()) ?? m); return s; };
   // 注册表里有、当前进程里没有的变量（如 PNPM_HOME、CODEX_HOME）补进来
   const have = new Set(Object.keys(process.env).map((k) => k.toUpperCase()));
