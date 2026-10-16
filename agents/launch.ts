@@ -92,6 +92,12 @@ export function peSubsystem(file: string): number | null {
 }
 /** 图形界面程序不是命令行 agent（桌面版 Kimi.exe / Claude.exe 这类），找命令时要跳过 */
 const isGuiExe = (p: string) => /\.exe$/i.test(p) && peSubsystem(p) === 2;
+/** 候选文件是不是图形程序：.exe 看 PE 头；.cmd/.bat 看它包装的目标（VS Code 系 IDE 的 bin\x.cmd 只是拉起 IDE 本体，不是 agent 命令行） */
+function isGuiLauncher(p: string): boolean {
+  if (/\.exe$/i.test(p)) return isGuiExe(p);
+  if (/\.(cmd|bat)$/i.test(p)) { const t = parseNpmShim(p); return !!t && isGuiExe(t); }
+  return false;
+}
 
 /** 在 PATH 与常见安装目录里找可执行文件。Windows 只认可直接执行的扩展名，.exe 优先于 .cmd */
 export function findBin(name: string): string | null {
@@ -108,7 +114,7 @@ export function findBin(name: string): string | null {
       const p = path.join(d, name + ext);
       try {
         fs.accessSync(p, WIN ? fs.constants.F_OK : fs.constants.X_OK);
-        if (fs.statSync(p).isFile() && !(WIN && isGuiExe(p))) return p;
+        if (fs.statSync(p).isFile() && !(WIN && isGuiLauncher(p))) return p;
       } catch {}
     }
   }
@@ -158,6 +164,46 @@ function isPE(file: string): boolean {
   } catch { return false; }
 }
 
+const realpath = (p: string) => { try { return fs.realpathSync.native(p); } catch { return p; } };
+
+/** 一个 npm 包的"平台可选依赖"（@scope/<plat>）可能在哪：按 node 的解析规则，从包的真实路径（pnpm 的 node_modules\<pkg> 是指向 .pnpm\… 的 junction）
+ *  与字面路径分别找 —— 嵌套在包自己的 node_modules 下、与包并列（npm 提升 / pnpm 虚拟目录里的同级依赖）、pnpm 的 .pnpm\node_modules 提升目录 */
+function platformPkgRoots(nm: string, scope: string, pkgName: string, plat: string): string[] {
+  const pkg = path.join(nm, scope, pkgName);
+  const real = realpath(pkg);
+  const roots = [
+    path.join(real, "node_modules", scope, plat), path.join(path.dirname(real), plat),
+    path.join(pkg, "node_modules", scope, plat), path.join(nm, scope, plat),
+    path.join(nm, ".pnpm", "node_modules", scope, plat),
+  ];
+  return [...new Set(roots)];
+}
+
+/** 照搬 @openai/codex bin/codex.js 的 detectPackageManager()：Codex 用它决定升级提示里写 npm 还是 pnpm / bun / vite-plus */
+function codexPackageManager(realRoot: string, script: string): "pnpm" | "bun" | "vite-plus" | "npm" {
+  const ownedByPnpm = (nm: string) => { try { return fs.existsSync(path.join(nm, ".modules.yaml")) && fs.realpathSync.native(path.join(nm, "@openai", "codex")) === realRoot; } catch { return false; } };
+  const ownedByVitePlus = (dir: string) => {
+    if (path.basename(dir) !== "packages") return false;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(dir, "@openai", "codex.json"), "utf8"));
+      if (meta.name !== "@openai/codex") return false;
+      const id: string = meta.installId || "";
+      const installDir = id.startsWith("#") ? path.join(dir, `@openai/codex${id}`) : path.join(dir, "@openai/codex", id);
+      return [path.join(installDir, "lib", "node_modules"), path.join(installDir, "node_modules")].some((nm) => { try { return fs.realpathSync.native(path.join(nm, "@openai", "codex")) === realRoot; } catch { return false; } });
+    } catch { return false; }
+  };
+  for (const start of new Set([realRoot, path.dirname(script)])) {
+    const fsRoot = path.parse(start).root;
+    for (let cur = start; cur !== fsRoot; cur = path.dirname(cur)) {
+      if (ownedByVitePlus(cur)) return "vite-plus";
+      if (ownedByPnpm(path.join(cur, "node_modules"))) return "pnpm";
+    }
+    if (ownedByPnpm(path.join(fsRoot, "node_modules"))) return "pnpm";
+  }
+  if (/[\\/]\.bun[\\/]install[\\/]global[\\/]/.test(realRoot) || /[\\/]\.bun[\\/]install[\\/]global[\\/]/.test(script)) return "bun";
+  return "npm";
+}
+
 type Native = { file: string; env?: Record<string, string>; pathPrepend?: string[] };
 
 /** 有些 npm 包只是原生二进制的壳（Codex）：直接找出该平台的二进制，省掉 node 这一层，并补上 codex.js 原本会设置的环境。
@@ -167,17 +213,18 @@ type Native = { file: string; env?: Record<string, string>; pathPrepend?: string
 function vendoredNative(script: string): Native | null {
   const m = script.match(/^(.*[\\/]node_modules)[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.[cm]?js$/i);
   if (!m) return null;
-  const nm = m[1], pkg = path.join(nm, "@openai", "codex");
+  const nm = m[1], pkg = path.join(nm, "@openai", "codex"), real = realpath(pkg);
   const arm = process.arch === "arm64";
   const triple = arm ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
   const plat = arm ? "codex-win32-arm64" : "codex-win32-x64";
-  const roots = [path.join(pkg, "node_modules", "@openai", plat), path.join(nm, "@openai", plat), pkg];
-  for (const root of roots) {
+  const roots = [...platformPkgRoots(nm, "@openai", "codex", plat), real, pkg];
+  for (const root of new Set(roots)) {
     for (const rel of [["vendor", triple, "bin", "codex.exe"], ["vendor", triple, "codex", "codex.exe"]]) {
       const p = path.join(root, ...rel);
       if (!isPE(p)) continue;
-      const rgDir = path.join(root, "vendor", triple, "path");
-      return { file: p, env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: pkg }, pathPrepend: fs.existsSync(rgDir) ? [rgDir] : undefined };
+      const managedBy = { npm: "CODEX_MANAGED_BY_NPM", pnpm: "CODEX_MANAGED_BY_PNPM", bun: "CODEX_MANAGED_BY_BUN", "vite-plus": "CODEX_MANAGED_BY_VITE_PLUS" }[codexPackageManager(real, script)];
+      const rgDir = path.join(root, "vendor", triple, "path");   // 旧版 codex.js 会把随附 rg 所在目录加进 PATH（新版本放在 codex-path\ 且不再改 PATH）
+      return { file: p, env: { [managedBy]: "1", CODEX_MANAGED_PACKAGE_ROOT: real }, pathPrepend: fs.existsSync(rgDir) ? [rgDir] : undefined };
     }
   }
   return null;
@@ -190,7 +237,7 @@ function claudeNativeFallback(target: string, cmdFile: string): Launcher | null 
   if (!m) return null;
   const nm = m[1], pkg = path.join(nm, "@anthropic-ai", "claude-code");
   const plat = process.arch === "arm64" ? "claude-code-win32-arm64" : "claude-code-win32-x64";
-  for (const root of [path.join(pkg, "node_modules", "@anthropic-ai", plat), path.join(nm, "@anthropic-ai", plat)]) {
+  for (const root of platformPkgRoots(nm, "@anthropic-ai", "claude-code", plat)) {
     for (const rel of [["claude.exe"], ["bin", "claude.exe"]]) {
       const p = path.join(root, ...rel);
       if (isPE(p)) return { file: p, prefix: [], shell: false };
@@ -226,7 +273,8 @@ export function launcherFor(bin: string): Launcher {
     for (let i = 0; target && /\.(cmd|bat)$/i.test(target); i++) target = i < 3 ? parseNpmShim(target) : null;
     const viaCmd: Launcher = { file: bin, prefix: [], shell: true };
     if (target && isNativeTarget(target)) {
-      // .exe 占位脚本（postinstall 没跑）：先找平台包里的真二进制；都没有就交给 cmd.exe，让它自己的报错显示出来
+      // .exe 占位脚本（postinstall 没跑）：先找平台包里的真二进制；都没有就交给 cmd.exe，让它自己的报错显示出来。
+      // 目标是图形程序时也走 cmd.exe：findBin 不会选这种包装脚本，用户自己指定的（VS Code 式的 bin\x.cmd 用 IDE 本体当 node 跑 cli.js）就按原样执行
       l = isPE(target) && !isGuiExe(target) ? { file: target, prefix: [], shell: false } : claudeNativeFallback(target, bin) ?? viaCmd;
     } else if (target && isNodeScript(target)) {
       const native = vendoredNative(target);

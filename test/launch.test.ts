@@ -19,9 +19,11 @@ const NPM_SHIM = (rel: string) => `@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET d
 const PNPM_SHIM = (rel: string) => `@SETLOCAL\r\n@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\${rel}" %*\r\n) ELSE (\r\n  @SET PATHEXT=%PATHEXT:;.JS;=;%\r\n  node  "%~dp0\\${rel}" %*\r\n)\r\n`;
 
 // bin 指向原生 .exe（文件没有 shebang）时 cmd-shim 生成的样子：没有 node 那一段，直接运行目标
-const NPM_DIRECT_SHIM = (rel: string) => `@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%dp0%\\${rel}"   %*\r\n`;
+const NPM_DIRECT_SHIM = (rel: string) => `@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\${rel}"   %*\r\n`;
 // pnpm 配置了 nodeExecPath 时的样子：node 写成绝对路径
-const PNPM_NODE_SHIM = (rel: string) => `@"C:\\Program Files\\nodejs\\node.exe"  "%~dp0\\${rel}" %*\r\n`;
+const PNPM_NODE_SHIM = (rel: string) => `@SETLOCAL\r\n@"C:\\Program Files\\nodejs\\node.exe"  "%~dp0\\${rel}" %*\r\n`;
+// pnpm（@zkochan/cmd-shim）为没有 shebang 的目标生成的样子
+const PNPM_DIRECT_SHIM = (rel: string) => `@SETLOCAL\r\n@"%~dp0\\${rel}"   %*\r\n`;
 
 function touch(p: string, content: string | Buffer = "") { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, content); }
 /** 最小的 PE 文件：DOS 头（MZ、e_lfanew=64）+ "PE\0\0" + COFF 头 + 可选头的 Subsystem 字段。2 = 图形界面，3 = 控制台 */
@@ -34,8 +36,11 @@ function pe(subsystem: number): Buffer {
 }
 const CUI = pe(3), GUI = pe(2);
 
-let npm: string, hoisted: string, legacy: string, broken: string, pnpmHome: string, yarnBin: string, localAppData: string, cacheDir: string, pnpmClaude: string, wrapperClaude: string;
-const realLocalAppData = process.env.LOCALAPPDATA;
+let npm: string, hoisted: string, legacy: string, broken: string, pnpmHome: string, yarnBin: string, localAppData: string, cacheDir: string, pnpmClaude: string, wrapperClaude: string, pnpmStore: string;
+// 查找逻辑会看 HOME / APPDATA / LOCALAPPDATA 下的真实安装目录：测试期间全部指到临时目录，开发机上装了什么都不影响结果
+const ENV_KEYS = ["LOCALAPPDATA", "APPDATA", "HOME", "USERPROFILE"] as const;
+const realEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+const CLAUDE_PLAT = process.arch === "arm64" ? "claude-code-win32-arm64" : "claude-code-win32-x64";
 
 before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pg-launch-"));
@@ -47,7 +52,7 @@ before(async () => {
   touch(path.join(npm, "node_modules", "@openai", "codex", "bin", "codex.js"), "// launcher\n");
   // 当前 @openai/codex 的布局：原生二进制在可选依赖 @openai/codex-win32-x64 里，嵌套在主包下
   touch(path.join(npm, "node_modules", "@openai", "codex", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe"), CUI);
-  touch(path.join(npm, "node_modules", "@openai", "codex", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "path", "rg.exe"), CUI);   // 随附的 ripgrep
+  touch(path.join(npm, "node_modules", "@openai", "codex", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "codex-path", "rg.exe"), CUI);   // 随附的 ripgrep（新版 codex.js 不再把它加进 PATH）
   // @anthropic-ai/claude-code 2.1.x：bin 指向 bin\claude.exe，postinstall 之后是真正的原生程序
   touch(path.join(npm, "claude"), "#!/bin/sh\n");
   touch(path.join(npm, "claude.cmd"), NPM_DIRECT_SHIM("node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"));
@@ -74,11 +79,23 @@ before(async () => {
   // 商店应用的执行别名目录：这里的 claude.exe 是桌面版，不是命令行，即使排在 PATH 最前面也要跳过
   localAppData = path.join(tmp, "AppData", "Local");
   const winApps = path.join(localAppData, "Microsoft", "WindowsApps");
-  touch(path.join(winApps, "claude.exe"), GUI);
+  touch(path.join(winApps, "claude.exe"), "");   // 真实的执行别名是 0 字节的重解析点，读不出 PE 头，只能靠跳过整个目录
   // %LOCALAPPDATA%\Programs\<name>\<name>.exe 多半是同名桌面应用（Electron，图形界面）：不能当成命令行；只有 Programs\<name>\bin\ 才看
-  touch(path.join(localAppData, "Programs", "Kimi", "Kimi.exe"), GUI);
+  touch(path.join(localAppData, "Programs", "Cody", "Cody.exe"), GUI);
   touch(path.join(localAppData, "Programs", "bare", "bare.exe"), CUI);
   touch(path.join(localAppData, "Programs", "droid", "bin", "droid.exe"), CUI);
+  // VS Code 系 IDE 的 bin\<name>.cmd：用 IDE 本体（图形程序）跑 cli.js，是打开 IDE 的命令，不是 agent 命令行
+  const ideLauncher = (name: string, exe: string) => {
+    const root = path.join(localAppData, "Programs", name);
+    touch(path.join(root, "bin", `${name}.cmd`), `@echo off\r\nsetlocal\r\nset VSCODE_DEV=\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%~dp0..\\${exe}" "%~dp0..\\resources\\app\\out\\cli.js" %*\r\nendlocal\r\n`);
+    touch(path.join(root, exe), GUI);
+    touch(path.join(root, "resources", "app", "out", "cli.js"), "// ide cli\n");
+    return path.join(root, "bin");
+  };
+  ideLauncher("trae", "Trae.exe");                                 // 只有 IDE：什么都不该选中
+  const qoderIdeBin = ideLauncher("qoder", "Qoder.exe");           // IDE 的 bin 排在 PATH 最前面，同名的 npm 命令行在后面：应选 npm 的
+  touch(path.join(npm, "qoder.cmd"), NPM_SHIM("node_modules\\qoder-cli\\bin\\qoder.js"));
+  touch(path.join(npm, "node_modules", "qoder-cli", "bin", "qoder.js"), "// cli\n");
 
   // 可选依赖被提升到上一层的布局
   hoisted = path.join(tmp, "hoisted");
@@ -90,6 +107,7 @@ before(async () => {
   touch(path.join(legacy, "codex.cmd"), NPM_SHIM("node_modules\\@openai\\codex\\bin\\codex.js"));
   touch(path.join(legacy, "node_modules", "@openai", "codex", "bin", "codex.js"), "// launcher\n");
   touch(path.join(legacy, "node_modules", "@openai", "codex", "vendor", TRIPLE, "codex", "codex.exe"), CUI);
+  touch(path.join(legacy, "node_modules", "@openai", "codex", "vendor", TRIPLE, "path", "rg.exe"), CUI);   // 旧版 codex.js 会把这个目录加进 PATH
   // 可选依赖没装上或 codex.exe 不是 PE 文件（下载失败、被安全软件替换）→ 退回 node + codex.js，让 codex.js 自己报错
   broken = path.join(tmp, "broken");
   touch(path.join(broken, "codex.cmd"), NPM_SHIM("node_modules\\@openai\\codex\\bin\\codex.js"));
@@ -102,12 +120,30 @@ before(async () => {
   // pnpm 配置了 nodeExecPath：node 是绝对路径，不能把它当成目标
   touch(path.join(pnpmHome, "bin", "crush.cmd"), PNPM_NODE_SHIM("..\\global\\5\\.pnpm\\crush@1.0.0\\node_modules\\crush\\dist\\index.js"));
   touch(path.join(pnpmHome, "global", "5", ".pnpm", "crush@1.0.0", "node_modules", "crush", "dist", "index.js"), "// cli\n");
-  // pnpm 默认不跑依赖的 postinstall：@anthropic-ai/claude-code 的 bin\claude.exe 还是 sh 占位脚本，真正的程序在平台包里
-  pnpmClaude = path.join(tmp, "pnpm-claude");
+  // npm install -g --ignore-scripts：@anthropic-ai/claude-code 的 bin\claude.exe 还是 sh 占位脚本，真正的程序在被提升到同级的平台包里
+  pnpmClaude = path.join(tmp, "noscripts-claude");
   touch(path.join(pnpmClaude, "claude.cmd"), NPM_DIRECT_SHIM("node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"));
   touch(path.join(pnpmClaude, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"), "#!/bin/sh\necho 'run install'\n");
   touch(path.join(pnpmClaude, "node_modules", "@anthropic-ai", "claude-code", "cli-wrapper.cjs"), "// wrapper\n");
-  touch(path.join(pnpmClaude, "node_modules", "@anthropic-ai", process.arch === "arm64" ? "claude-code-win32-arm64" : "claude-code-win32-x64", "claude.exe"), CUI);
+  touch(path.join(pnpmClaude, "node_modules", "@anthropic-ai", CLAUDE_PLAT, "claude.exe"), CUI);
+  // pnpm 全局安装的真实布局：PNPM_HOME\x.cmd → global\5\node_modules\<pkg>（指向 .pnpm\<pkg>@<ver>\node_modules\<pkg> 的 junction），
+  // 平台可选依赖是虚拟目录里的同级包；pnpm 默认不跑依赖的 postinstall，所以 claude.exe 还是占位脚本
+  pnpmStore = path.join(tmp, "pnpm-store");
+  const g5 = path.join(pnpmStore, "global", "5", "node_modules");
+  touch(path.join(g5, ".modules.yaml"), "layoutVersion: 5\n");
+  const claudeReal = path.join(g5, ".pnpm", "@anthropic-ai+claude-code@2.1.301", "node_modules", "@anthropic-ai", "claude-code");
+  touch(path.join(claudeReal, "bin", "claude.exe"), "#!/bin/sh\necho 'run install'\n");
+  touch(path.join(claudeReal, "cli-wrapper.cjs"), "// wrapper\n");
+  touch(path.join(path.dirname(claudeReal), CLAUDE_PLAT, "claude.exe"), CUI);
+  fs.mkdirSync(path.join(g5, "@anthropic-ai"), { recursive: true });
+  fs.symlinkSync(claudeReal, path.join(g5, "@anthropic-ai", "claude-code"), "junction");
+  touch(path.join(pnpmStore, "claude.cmd"), PNPM_DIRECT_SHIM("global\\5\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"));
+  const codexReal = path.join(g5, ".pnpm", "@openai+codex@0.163.0", "node_modules", "@openai", "codex");
+  touch(path.join(codexReal, "bin", "codex.js"), "// launcher\n");
+  touch(path.join(path.dirname(codexReal), PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe"), CUI);
+  fs.mkdirSync(path.join(g5, "@openai"), { recursive: true });
+  fs.symlinkSync(codexReal, path.join(g5, "@openai", "codex"), "junction");
+  touch(path.join(pnpmStore, "codex.cmd"), PNPM_SHIM("global\\5\\node_modules\\@openai\\codex\\bin\\codex.js"));
   // 平台包也没有：退到主包的 cli-wrapper.cjs
   wrapperClaude = path.join(tmp, "wrapper-claude");
   touch(path.join(wrapperClaude, "claude.cmd"), NPM_DIRECT_SHIM("node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"));
@@ -137,14 +173,17 @@ before(async () => {
   touch(path.join(npm, "node_modules", "stub-tool", "bin", "stub.exe"), "#!/bin/sh\necho 'run node install.cjs'\n");
 
   Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-  process.env.PATH = [winApps, npm, local, path.join(pnpmHome, "bin")].join(path.delimiter);
+  process.env.PATH = [winApps, qoderIdeBin, npm, local, path.join(pnpmHome, "bin")].join(path.delimiter);
   process.env.LOCALAPPDATA = localAppData;
-  launch = await import("../agents/launch.ts");
+  process.env.APPDATA = path.join(tmp, "AppData", "Roaming");
+  process.env.HOME = process.env.USERPROFILE = path.join(tmp, "home");
+  fs.mkdirSync(path.join(tmp, "home"), { recursive: true });
+  launch = await import("../agents/launch.ts");   // HOME 在模块加载时读取，必须在设好环境变量之后再 import
 });
 after(() => {
   Object.defineProperty(process, "platform", { value: realPlatform, configurable: true });
   process.env.PATH = realPath;
-  if (realLocalAppData === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = realLocalAppData;
+  for (const k of ENV_KEYS) { if (realEnv[k] === undefined) delete process.env[k]; else process.env[k] = realEnv[k]; }
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -181,10 +220,16 @@ test("图形界面的 .exe 不算命令行：PATH 上同名的桌面版被跳过
 });
 
 test("%LOCALAPPDATA%\\Programs\\<name>\\ 只看 bin\\ 子目录：同名桌面应用不会被当成命令行", () => {
-  assert.equal(launch.findBin("Kimi"), null);
+  assert.equal(launch.findBin("Cody"), null);
   assert.equal(launch.findBin("bare"), null);
   const droid = launch.findBin("droid");
   assert.ok(droid && droid.endsWith(path.join("Programs", "droid", "bin", "droid.exe")), `got ${droid}`);
+});
+
+test("IDE 自带的 bin\\<name>.cmd 背后是图形程序：不当成命令行，排在 PATH 前面也让给后面同名的 npm 命令", () => {
+  assert.equal(launch.findBin("trae"), null);
+  const bin = launch.findBin("qoder");
+  assert.ok(bin && bin.endsWith(path.join("npm", "qoder.cmd")), `got ${bin}`);
 });
 
 test("解析 npm 包装脚本得到真正的 node 脚本", () => {
@@ -211,13 +256,20 @@ test("Codex 的 npm 包直接定位到自带的原生二进制（嵌套在主包
   assert.equal(l.shell, false);
   assert.ok(l.file.endsWith(path.join(PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe")), `got ${l.file}`);
   assert.deepEqual(l.prefix, []);
-  assert.deepEqual(l.env, { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: path.join(npm, "node_modules", "@openai", "codex") });
-  assert.deepEqual(l.pathPrepend, [path.join(npm, "node_modules", "@openai", "codex", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "path")]);
+  assert.deepEqual(l.env, { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: fs.realpathSync.native(path.join(npm, "node_modules", "@openai", "codex")) });
+  assert.equal(l.pathPrepend, undefined);   // 新版布局里 rg 在 codex-path\，codex.js 不改 PATH
   const env = launch.envForLauncher(l, { Path: "C:\\Windows", FOO: "1" });
-  assert.equal(env.Path, `${l.pathPrepend![0]}${path.delimiter}C:\\Windows`);
+  assert.equal(env.Path, "C:\\Windows");
   assert.equal(env.CODEX_MANAGED_BY_NPM, "1");
   assert.equal(env.FOO, "1");
   assert.equal(launch.envForLauncher({ file: "x", prefix: [], shell: false }, { Path: "p" }).Path, "p");
+});
+
+test("Codex：pnpm 全局安装（junction + 虚拟目录）也能找到同级平台包，并按 pnpm 标记由谁管理", () => {
+  const l = launch.launcherFor(path.join(pnpmStore, "codex.cmd"));
+  assert.equal(l.shell, false);
+  assert.ok(l.file.endsWith(path.join("@openai+codex@0.163.0", "node_modules", "@openai", PLAT_PKG, "vendor", TRIPLE, "bin", "codex.exe")), `got ${l.file}`);
+  assert.deepEqual(l.env, { CODEX_MANAGED_BY_PNPM: "1", CODEX_MANAGED_PACKAGE_ROOT: fs.realpathSync.native(path.join(pnpmStore, "global", "5", "node_modules", "@openai", "codex")) });
 });
 
 test("Codex：可选依赖被提升到上一层时也能找到", () => {
@@ -239,7 +291,11 @@ test("Codex：codex.exe 只是占位脚本（postinstall 没跑）时退回 node
   assert.ok(l.prefix[0].endsWith("codex.js"), `got ${l.prefix[0]}`);
 });
 
-test("Codex：旧版本 / 提升布局没有随附 rg 目录时不加 PATH", () => {
+test("Codex：旧版本随附的 vendor/<triple>/path 加进 PATH 最前面；没有这个目录就不动 PATH", () => {
+  const l = launch.launcherFor(path.join(legacy, "codex.cmd"));
+  const rg = path.join(legacy, "node_modules", "@openai", "codex", "vendor", TRIPLE, "path");
+  assert.deepEqual(l.pathPrepend, [rg]);
+  assert.equal(launch.envForLauncher(l, { Path: "C:\\Windows" }).Path, `${rg}${path.delimiter}C:\\Windows`);
   assert.equal(launch.launcherFor(path.join(hoisted, "codex.cmd")).pathPrepend, undefined);
 });
 
@@ -257,10 +313,17 @@ test("Claude Code 的 npm 包：包装脚本指向 bin\\claude.exe，直接运�
   assert.deepEqual(l.prefix, []);
 });
 
-test("Claude Code：bin\\claude.exe 还是占位脚本（pnpm 没跑 postinstall）时用平台包里的 claude.exe", () => {
+test("Claude Code：bin\\claude.exe 还是占位脚本（没跑 postinstall）时用提升到同级的平台包里的 claude.exe", () => {
   const l = launch.launcherFor(path.join(pnpmClaude, "claude.cmd"));
   assert.equal(l.shell, false);
-  assert.ok(/claude-code-win32-(x64|arm64)[\\/]claude\.exe$/.test(l.file), `got ${l.file}`);
+  assert.equal(l.file, path.join(pnpmClaude, "node_modules", "@anthropic-ai", CLAUDE_PLAT, "claude.exe"));
+  assert.deepEqual(l.prefix, []);
+});
+
+test("Claude Code：pnpm 全局安装（junction + 虚拟目录）时找到虚拟目录里同级的平台包", () => {
+  const l = launch.launcherFor(path.join(pnpmStore, "claude.cmd"));
+  assert.equal(l.shell, false);
+  assert.ok(l.file.endsWith(path.join("@anthropic-ai+claude-code@2.1.301", "node_modules", "@anthropic-ai", CLAUDE_PLAT, "claude.exe")), `got ${l.file}`);
   assert.deepEqual(l.prefix, []);
 });
 
