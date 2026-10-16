@@ -30,7 +30,7 @@ export function logAuthError(e: any, trace: string) {
 
 /** 返回位置白名单 */
 export function safeReturnTo(v: unknown): string {
-  const m = typeof v === "string" && /^(\/|\/account|\/app|\/device(?:\?code=[A-Z0-9-]{1,12})?)(#[\w-]{1,40})?$/.exec(v);
+  const m = typeof v === "string" && /^(\/|\/account|\/app|\/admin|\/device(?:\?code=[A-Z0-9-]{1,12})?)(#[\w-]{1,40})?$/.exec(v);
   return m ? m[1] + (m[2] || "") : "/";
 }
 

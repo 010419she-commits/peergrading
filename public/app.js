@@ -26,7 +26,7 @@ function renderAccess() {
   const b = $("#access-badge"); if (!b || !me) return;
   const a = me.access;
   b.className = "access" + (a.member ? " member" : "");
-  b.textContent = a.member ? t("memberBadge") : t("trialBadge")(a.trial.daysLeft, a.trial.usesLeft);
+  b.textContent = a.member ? t("memberBadge") : a.beta ? t("betaBadge") : t("trialBadge")(a.trial.daysLeft, a.trial.usesLeft);
 }
 function showPaywall(access) {
   const p = $("#paywall"); if (!p) return;
@@ -42,9 +42,25 @@ const msgs = new Map();
 const versions = [];
 
 marked.setOptions({ breaks: true });
+/** 协作中生成的图片 / 视频以 media://文件名 引用，渲染时指向当前会话的媒体接口。在渲染器层做映射，代码块 / 行内代码里的引用原样保留 */
+const mediaUrl = (file) => `/api/sessions/${encodeURIComponent(currentSessionId || "")}/media/${encodeURIComponent(file)}`;
+const MEDIA_REF = /^media:\/\/([A-Za-z0-9._-]+)$/;
+marked.use({ renderer: {
+  image(href, title, text) {
+    const m = MEDIA_REF.exec(href || ""); if (!m) return false;
+    const file = m[1], t = title ? ` title="${esc(title)}"` : "";
+    if (/\.(mp4|webm)$/i.test(file)) return `<video class="media" controls preload="metadata" src="${mediaUrl(file)}" title="${esc(text)}"></video>`;
+    return `<img class="media" src="${mediaUrl(file)}" alt="${esc(text)}"${t}>`;
+  },
+  link(href, title, text) {
+    const m = MEDIA_REF.exec(href || ""); if (!m) return false;
+    return `<a href="${mediaUrl(m[1])}" target="_blank" rel="noopener"${title ? ` title="${esc(title)}"` : ""}>${text}</a>`;
+  },
+} });
 function render(md) {
-  const html = marked.parse(md.replace(/<deliverable>/gi, '\n\n<div class="deliv">\n\n').replace(/<\/deliverable>/gi, '\n\n</div>\n\n'));
-  return DOMPurify.sanitize(html, { ADD_ATTR: ["class"] });
+  const src = md.replace(/<deliverable>/gi, '\n\n<div class="deliv">\n\n').replace(/<\/deliverable>/gi, '\n\n</div>\n\n');
+  const html = marked.parse(src);
+  return DOMPurify.sanitize(html, { ADD_ATTR: ["class", "controls", "preload", "target"] });
 }
 const tx = (v) => (v && typeof v === "object" ? v[lang] : v ?? "");
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -64,6 +80,7 @@ $("#lang-seg").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
   lang = b.dataset.lang; try { localStorage.setItem("lang", lang); } catch {}
   applyI18n();
+  if (mediaCfg) renderMediaSettings();   // 侧栏的媒体提示与占位文字是程序写入的，随语言一起刷新
 };
 
 /* ---------- 智能体检测与选择 ---------- */
@@ -191,9 +208,27 @@ function handle(ev) {
     case "message_end": {
       const m = msgs.get(ev.id); if (!m) break;
       if (m.timer) { clearInterval(m.timer); m.timer = 0; m.prog.remove(); }
+      if (typeof ev.text === "string") m.text = ev.text;   // 媒体围栏已替换为图片 / 视频引用
       m.body.classList.remove("cursor"); m.body.innerHTML = render(m.text);
       if (ev.verdict) { const v = m.el.querySelector(".verdict"); v.className = "tag verdict " + (ev.verdict === "approve" ? "ok" : "warn"); v.textContent = t(ev.verdict); }
       if (ev.usage) m.el.querySelector(".usage").textContent = t("tokens")(ev.usage.input, ev.usage.output);
+      break;
+    }
+    case "media_start": {
+      const m = msgs.get(ev.id); if (!m) break;
+      if (!m.mediaBox) { m.mediaBox = document.createElement("div"); m.mediaBox.className = "media-status"; m.body.after(m.mediaBox); m.mediaRows = new Map(); }
+      const row = document.createElement("div"); row.dataset.kind = ev.kind; row.textContent = t("mediaGenerating")(t("mediaKind")[ev.kind] || ev.kind);
+      m.mediaBox.appendChild(row); m.mediaRows.set(ev.mediaId, row); scrollBottom(); break;
+    }
+    case "media_progress": {
+      const row = msgs.get(ev.id)?.mediaRows?.get(ev.mediaId); if (!row) break;
+      row.textContent = t("mediaProgress")(t("mediaKind")[row.dataset.kind] || row.dataset.kind, ev.status, ev.percent); break;
+    }
+    case "media_end": {
+      const m = msgs.get(ev.id); const row = m?.mediaRows?.get(ev.mediaId); if (!row) break;
+      if (ev.ok) { row.remove(); m.mediaRows.delete(ev.mediaId); }
+      else { row.classList.add("err"); row.textContent = t("mediaFailed")(t("mediaKind")[ev.kind] || ev.kind, ev.error || ""); m.mediaRows.delete(ev.mediaId); }
+      if (m.mediaBox && !m.mediaBox.childElementCount) { m.mediaBox.remove(); m.mediaBox = null; }
       break;
     }
     case "version": {
@@ -256,10 +291,18 @@ function handle(ev) {
     case "done": $("#final").textContent = "✓ " + ev.reason; showVersion(ev.finalVersion); setTimeout(renderFinalizer, 300); break;
     case "error": {
       for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
+      settleMediaRows();
       const p = document.createElement("p"); p.className = "sys err"; p.textContent = t("error") + ev.message; tl.appendChild(p);
       $("#status").innerHTML = `<span class="err">${esc(ev.message)}</span>`; scrollBottom();
       break;
     }
+  }
+}
+/** 协作结束（停止、断线、出错）时还挂着"正在生成…"的行：没有 media_end 会来了，标成已中断 */
+function settleMediaRows() {
+  for (const m of msgs.values()) {
+    if (!m.mediaRows?.size) continue;
+    for (const [id, row] of m.mediaRows) { row.classList.add("err"); row.textContent = t("mediaInterrupted")(t("mediaKind")[row.dataset.kind] || row.dataset.kind); m.mediaRows.delete(id); }
   }
 }
 let currentVersion = 0, currentSessionId = null, finEnv = null, finController = null, finRunId = null;
@@ -272,6 +315,40 @@ function showVersion(n) {
 }
 
 /* ---------- 收尾 Agent ---------- */
+/* ---------- 图片 / 视频生成设置 ---------- */
+let mediaCfg = null;
+const mediaPref = (() => { try { return JSON.parse(localStorage.getItem("media") || "null"); } catch { return null; } })() || { images: true, videos: false };
+async function loadMediaSettings() {
+  try { mediaCfg = await (await fetch("/api/media/settings")).json(); } catch { mediaCfg = null; }
+  renderMediaSettings();
+}
+function renderMediaSettings() {
+  const c = mediaCfg, hint = $("#media-hint"), box = $("#media-config"), imgs = $("#media-images"), vids = $("#media-videos");
+  if (!c) { hint.textContent = ""; box.hidden = true; imgs.disabled = vids.disabled = true; imgs.checked = vids.checked = false; return; }
+  imgs.disabled = !c.configured || !c.images; vids.disabled = !c.configured || !c.videos;
+  imgs.checked = !imgs.disabled && !!mediaPref.images; vids.checked = !vids.disabled && !!mediaPref.videos;
+  hint.textContent = c.configured ? (c.canEdit ? t("mediaReady")(c.keyHint, c.limits.images, c.limits.videos) : t("mediaReadyUser")(c.limits.images, c.limits.videos)) : c.canEdit ? t("mediaNotConfigured") : t("mediaNotConfiguredUser");
+  box.hidden = !c.canEdit;
+  if (c.canEdit) {
+    $("#media-key").value = ""; $("#media-key").placeholder = c.configured ? t("mediaKeyKeep")(c.keyHint) : t("mediaKeyPh");
+    $("#media-clear").hidden = c.keySource !== "file";   // 环境变量里的 Key 不能从界面清除
+    $("#media-msg").textContent = c.keySource === "env" ? t("mediaKeyEnv") : "";
+    $("#media-base").value = c.baseUrl; $("#media-image-model").value = c.imageModel; $("#media-video-model").value = c.videoModel;
+    if (!c.configured) box.open = true;
+  }
+}
+async function saveMediaSettings(clear) {
+  const body = clear ? { apiKey: "" } : { baseUrl: $("#media-base").value, imageModel: $("#media-image-model").value, videoModel: $("#media-video-model").value };
+  const key = $("#media-key").value.trim(); if (!clear && key) body.apiKey = key;
+  const r = await fetch("/api/media/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  $("#media-msg").textContent = r.ok ? t("mediaSaved") : t("error") + (j.error || r.status);
+  if (r.ok) { mediaCfg = j; renderMediaSettings(); }
+}
+for (const k of ["images", "videos"]) $("#media-" + k).addEventListener("change", (e) => { mediaPref[k] = e.target.checked; try { localStorage.setItem("media", JSON.stringify(mediaPref)); } catch {} });
+$("#media-save").onclick = () => saveMediaSettings(false);
+$("#media-clear").onclick = () => saveMediaSettings(true);
+
 async function loadFinEnv() { try { finEnv = await (await fetch("/api/finalize/env")).json(); } catch { finEnv = { docker: false, hostSupported: true }; } renderFinalizer(); }
 function renderFinalizer() {
   const box = $("#finalizer"); if (!box) return;
@@ -342,7 +419,8 @@ async function start() {
   if (!task.trim()) { $("#status").textContent = t("needTask"); return; }
   if (!chosen.A || !chosen.B) { $("#status").textContent = t("needAgents"); return; }
   const slot = (k) => ({ agentId: chosen[k].id, name: $("#name-" + k).value, persona: $("#persona-" + k).value, effort: $("#effort-" + k).value });
-  const body = { task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value };
+  const body = { task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
+    media: { images: $("#media-images").checked, videos: $("#media-videos").checked } };
   resetView(); setRunning(true);
   controller = new AbortController();
   try {
@@ -366,6 +444,7 @@ async function start() {
     if (e.name !== "AbortError") handle({ type: "error", message: e.message });
   } finally {
     for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
+    settleMediaRows();
     setRunning(false); runId = null; loadHistory(); bootstrapAuth();
   }
 }
@@ -392,6 +471,6 @@ $("#start").onclick = start;
 $("#stop").onclick = stop;
 $("#history").onchange = (e) => replay(e.target.value);
 applyI18n();
-bootstrapAuth().then((ok) => { if (!ok) return; renderAccess(); loadHistory(); loadAgents(); loadFinEnv();
+bootstrapAuth().then((ok) => { if (!ok) return; renderAccess(); loadHistory(); loadAgents(); loadFinEnv(); loadMediaSettings();
 fetch("/api/apps").then((r) => r.json()).then((j) => { $("#apps").innerHTML = j.apps.map((a) => `<option value="${esc(a)}">`).join(""); }).catch(() => {});
 });

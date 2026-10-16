@@ -13,9 +13,9 @@
 
   function initialReturnTo() {
     const p = new URLSearchParams(location.search).get("return_to");
-    if (p && /^\/(account|app|device(\?code=[A-Z0-9-]{1,12})?)?(#[\w-]{1,40})?$/.test(p)) return p;
+    if (p && /^\/(account|app|admin|device(\?code=[A-Z0-9-]{1,12})?)?(#[\w-]{1,40})?$/.test(p)) return p;
     if (location.pathname === "/device") return "/device" + (location.search.match(/^\?code=[A-Z0-9-]{1,12}$/) ? location.search : "");
-    return /^\/(account|app)?$/.test(location.pathname) ? location.pathname + location.hash : "/app";
+    return /^\/(account|app|admin)?$/.test(location.pathname) ? location.pathname + location.hash : "/app";
   }
   function toast(msg, ms = 4000) { if (!toastEl) return; toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (toastEl.hidden = true), ms); }
   async function postJson(url, body) {
@@ -82,6 +82,7 @@
       f.lastChild.dataset.provider = provider; return f;
     };
     let any = false;
+    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); }
     if (p?.google?.available) { any = true; box.append(form("google", t("loginGoogle"))); if (p.google.hint) box.append(el("p", { className: "fine", textContent: p.google.hint })); }
     if (p?.dev?.available) { any = true; box.append(form("dev", t("loginDev"))); }
     if (!any) box.append(el("p", { className: "muted", textContent: t("noProviders") }));
@@ -116,7 +117,7 @@
     }
     if (S.user.avatar && /^https:\/\//.test(S.user.avatar)) { const img = el("img", { className: "avatar", src: S.user.avatar, alt: "", referrerPolicy: "no-referrer" }); img.addEventListener("error", () => img.remove()); box.append(img); }
     box.append(el("span", { className: "user-name", textContent: S.user.name || t("user") }));
-    box.append(el("span", { className: "badge" + (isMember() ? "" : " soft"), textContent: isMember() ? t("memberBadge") : t("trialBadge")(S.user.access.trial.daysLeft, S.user.access.trial.usesLeft) }));
+    box.append(el("span", { className: "badge" + (isMember() ? "" : " soft"), textContent: isMember() ? t("memberBadge") : S.user.access.beta ? t("betaBadge") : t("trialBadge")(S.user.access.trial.daysLeft, S.user.access.trial.usesLeft) }));
     if (S.webWorkspace && !/^\/app/.test(location.pathname)) box.append(el("a", { className: "button small button-primary", href: "/app", textContent: t("openApp") }));
     else if (location.pathname === "/") box.append(el("a", { className: "button small button-primary", href: "#download", textContent: t("downloadNav") }));
     if (!/^\/account/.test(location.pathname)) box.append(el("a", { className: "text-link", href: "/account", textContent: t("account") }));
@@ -153,40 +154,59 @@
     box.replaceChildren(card(t("dlMac"), t("dlMacSub"), [[t("dlApple"), d?.macArm], [t("dlIntel"), d?.macIntel]], t("dlSoon"), { text: t("dlMacGatekeeper"), command: "xattr -cr /Applications/PeerGrading.app" }), card(t("dlWin"), t("dlWinSub"), [["", d?.win]], t("dlSoon")));
   }
   renderDownloads();
-  function planLines() {
-    const p = S.plan; if (!p) return { price: "", period: "" };
-    return { price: fmtMoney(p.priceCents, p.currency), period: p.mode === "permanent" ? t("buyout") : t("perDays")(p.days) };
+  const planName = (pl) => { const k = "plan_" + pl.code; const v = (L[lang] || {})[k] ?? (L.zh || {})[k]; return v ?? pl.name; };
+  const planPeriod = (pl) => (pl.mode === "permanent" ? t("lifetime") : t("perDays")(pl.days));
+  const planDesc = (pl) => { const k = "planDesc_" + pl.code; const v = t(k); return v === k ? "" : typeof v === "function" ? v(pl.limit) : v; };
+  function accessLine(a) {
+    if (a.beta) return t("betaStatus") + (a.member ? " " + memberText() : "");
+    if (a.member) return memberText();
+    if (a.trial.active) return t("trialLeft")(a.trial.daysLeft, a.trial.usesLeft);
+    return t(a.reason === "trial_expired" ? "trialExpired" : "trialExhausted");
+  }
+  /** 方案卡片：首页定价区与账号页共用。内测期间按钮禁用并标「内测结束后开放」 */
+  function renderPlanCards(host) {
+    const p = S.plan; if (!host || !p?.plans) return;
+    host.replaceChildren();
+    const a = S.user?.access;
+    for (const pl of p.plans) {
+      const card = el("div", { className: "plan" + (pl.limit != null ? " featured" : "") },
+        el("h3", { textContent: planName(pl) }),
+        el("div", { className: "price" }, fmtMoney(pl.priceCents, pl.currency), el("small", { textContent: planPeriod(pl) })));
+      const d = planDesc(pl); if (d) card.append(el("p", { className: "muted", textContent: d }));
+      if (pl.limit != null) card.append(el("span", { className: "badge" + (pl.left > 0 ? "" : " soft"), textContent: pl.left > 0 ? t("slotsLeft")(pl.left) : t("soldOut") }));
+      const btn = el("button", { className: "button button-primary", type: "button" });
+      if (p.beta) { btn.textContent = t("openAfterBeta"); btn.disabled = true; }
+      else if (pl.limit != null && !(pl.left > 0)) { btn.textContent = t("soldOut"); btn.disabled = true; }
+      else if (S.status !== "authenticated") { btn.textContent = t("loginToBuy"); btn.onclick = () => openLogin({ returnTo: "/account#pricing" }); }
+      else if (a?.permanent) { btn.textContent = t("alreadyMember"); btn.disabled = true; }
+      else { btn.textContent = a?.member && pl.mode === "days" ? t("renew") : t("buyNow"); btn.addEventListener("click", busy(btn, () => startPurchase(pl.code))); }
+      card.append(btn); host.append(card);
+    }
   }
   function renderPricing() {
     const p = S.plan; if (!p) return;
-    const pl = planLines();
-    const put = (id, v) => { const n = $(id); if (n) n.textContent = v; };
-    put("#trial-title", t("trialTitle")); put("#trial-desc", t("trialDesc")(p.trialDays, p.trialUses));
-    put("#plan-price", pl.price); put("#plan-period", pl.period); put("#plan-desc", t("planDesc"));
+    const put = (id, v) => { const n = $(id); if (n) { n.textContent = v; n.hidden = !v; } };
+    put("#pricing-title", p.beta ? t("pricingTitleBeta") : t("pricingTitle"));
+    put("#trial-title", p.beta ? t("betaTitle") : t("trialTitle")); put("#trial-desc", p.beta ? t("betaDesc") : t("trialDesc")(p.trialDays, p.trialUses));
+    put("#plans-title", p.beta ? t("afterBetaPlans") : "");
+    renderPlanCards($("#plans"));
     const box = $("#membership-status"); if (!box) return;
     box.replaceChildren(); box.className = "notice";
-    const buyBtn = $("#buy-btn");
-    if (S.status !== "authenticated") {
-      if (buyBtn) { buyBtn.textContent = t("loginToBuy"); buyBtn.onclick = () => openLogin({ returnTo: "/account#pricing" }); }
-      box.append(el("span", { textContent: t("pricingAnon")(p.trialDays, p.trialUses) }));
-      return;
-    }
+    if (S.status !== "authenticated") { box.append(el("span", { textContent: p.beta ? t("pricingAnonBeta") : t("pricingAnon")(p.trialDays, p.trialUses) })); return; }
     const a = S.user.access;
-    const renewable = p.mode === "days";
-    if (buyBtn) { buyBtn.textContent = a.member ? (renewable ? t("renew") : t("alreadyMember")) : t("buyNow"); buyBtn.disabled = a.member && !renewable; buyBtn.onclick = () => startPurchase(); }
-    if (a.member) { box.classList.add("ok"); box.append(el("span", { textContent: memberText() })); }
-    else if (a.trial.active) box.append(el("span", { textContent: t("trialLeft")(a.trial.daysLeft, a.trial.usesLeft) }));
-    else { box.classList.add("warn"); box.append(el("span", { textContent: t(a.reason === "trial_expired" ? "trialExpired" : "trialExhausted") })); }
+    if (a.member || a.beta) box.classList.add("ok"); else if (!a.trial.active) box.classList.add("warn");
+    box.append(el("span", { textContent: accessLine(a) }));
   }
   function memberText() {
     const m = S.user.entitlements.find((e) => e.code === "member");
     if (!m?.active) return "";
     return m.permanentNow ? t("memberPermanent") : t("memberUntil")(fmtDate(m.continuousUntil));
   }
-  async function startPurchase() {
+  async function startPurchase(planCode) {
     if (!S.user) return openLogin({ returnTo: "/account#pricing" });
-    const r = await postJson("/api/billing/orders");
-    if (!r.ok || !r.order) return toast(r.error === "csrf" ? t("stale") : t("orderFailed"));
+    if (S.plan?.beta) return toast(t("betaFreeOrder"));
+    const r = await postJson("/api/billing/orders", { plan: planCode || S.plan?.plans?.[0]?.code });
+    if (!r.ok || !r.order) return toast(r.error === "csrf" ? t("stale") : r.error === "beta_free" ? t("betaFreeOrder") : r.error === "sold_out" ? t("soldOutOrder") : t("orderFailed"));
     renderOrder(r.order);
   }
   function renderOrder(o) {
@@ -195,6 +215,7 @@
     box.replaceChildren(
       el("div", { className: "eyebrow", textContent: t("orderCreated") }),
       el("div", {}, el("span", { className: "muted", textContent: t("orderNo") + " " }), el("span", { className: "no", textContent: o.no })),
+      el("div", {}, el("span", { className: "muted", textContent: t("planLabel") + " " }), el("span", { textContent: (S.plan?.plans || []).filter((x) => x.code === o.plan).map(planName)[0] || o.plan || "" })),
       el("div", {}, el("span", { className: "muted", textContent: t("amount") + " " }), el("strong", { textContent: fmtMoney(o.amountCents, o.currency) })),
     );
     if (o.qrUrl) box.append(el("img", { src: o.qrUrl, alt: t("payQr") }));
@@ -221,28 +242,42 @@
     // 使用权
     const kv = el("dl", { className: "kv" });
     const row = (k, v) => kv.append(el("dt", { textContent: k }), el("dd", { textContent: v }));
-    row(t("statusLabel"), a.member ? memberText() : a.trial.active ? t("trialLeft")(a.trial.daysLeft, a.trial.usesLeft) : t(a.reason === "trial_expired" ? "trialExpired" : "trialExhausted"));
+    row(t("statusLabel"), accessLine(a));
+    row(t("daysLeftLabel"), a.daysLeft == null ? t("permanentLabel") : a.beta && !a.member ? t("betaUnlimited") : t("daysUnit")(a.daysLeft));
     row(t("usedLabel"), String(a.trial.used));
     row(t("sinceLabel"), fmtDate(S.user.createdAt));
+    row(t("userIdLabel"), String(S.user.id));
     root.append(el("h3", { textContent: t("accessTitle") }), kv);
-    if (!a.member || S.plan?.mode === "days") { const b = el("button", { className: "button button-primary", type: "button", textContent: (a.member ? t("renew") : t("buyNow")) + " · " + planLines().price }); b.addEventListener("click", busy(b, startPurchase)); root.append(el("div", { className: "notice", id: "order-box" }, b)); }
+    if (!a.permanent) { const plans = el("div", { className: "plans" }); renderPlanCards(plans); root.append(el("h3", { textContent: S.plan?.beta ? t("afterBetaPlans") : t("plansTitle") }), plans, el("div", { id: "order-box" })); }
+    renderReferral(root);
+    renderWechatGroup(root);
     // 订单
     fetch("/api/billing/status").then((r) => r.json()).then((d) => {
       if (!d.orders?.length) return;
-      const tbl = el("table", { className: "orders" }, el("thead", {}, el("tr", {}, el("th", { textContent: t("orderNo") }), el("th", { textContent: t("amount") }), el("th", { textContent: t("statusLabel") }), el("th", { textContent: t("timeLabel") }))));
+      const nameOf = (code) => (S.plan?.plans || []).filter((x) => x.code === code).map(planName)[0] || code || "";
+      const tbl = el("table", { className: "orders" }, el("thead", {}, el("tr", {}, el("th", { textContent: t("orderNo") }), el("th", { textContent: t("planLabel") }), el("th", { textContent: t("amount") }), el("th", { textContent: t("statusLabel") }), el("th", { textContent: t("timeLabel") }))));
       const tb = el("tbody");
-      for (const o of d.orders) tb.append(el("tr", {}, el("td", { textContent: o.merchant_order_no }), el("td", { textContent: fmtMoney(o.amount_cents, o.currency) }), el("td", { textContent: t("os_" + o.status) }), el("td", { textContent: fmtDate(o.created_at) })));
+      for (const o of d.orders) tb.append(el("tr", {}, el("td", { textContent: o.merchant_order_no }), el("td", { textContent: nameOf(o.plan_code) }), el("td", { textContent: fmtMoney(o.amount_cents, o.currency) }), el("td", { textContent: t("os_" + o.status) }), el("td", { textContent: fmtDate(o.created_at) })));
       tbl.append(tb); root.append(el("h3", { textContent: t("ordersTitle") }), tbl);
       const pending = d.orders.find((o) => o.status === "pending");
-      if (pending && !a.member) { const b = el("button", { className: "text-link", type: "button", textContent: t("continuePay") }); b.addEventListener("click", startPurchase); root.append(b); }
+      if (pending && !a.permanent && !S.plan?.beta) { const b = el("button", { className: "text-link", type: "button", textContent: t("continuePay") }); b.addEventListener("click", () => startPurchase(pending.plan_code)); root.append(b); }
     }).catch(() => {});
     // 身份
-    const names = { google: "Google", dev: t("devAccount") };
+    const names = { google: "Google", wechat: t("wechat"), dev: t("devAccount") }, chan = { mp: t("chanMp"), open: t("chanQr") };
     const ids = S.user.identities, providersHeld = new Set(ids.map((i) => i.provider));
     const canRemove = ids.length > 1;
     const needVerify = () => toast(t("needVerify"), 6000);
     const list = el("ul", { className: "id-list" });
-    for (const i of ids) {
+    // 微信：扫码与公众号两个身份显示为一组，整组解绑；重新验证只能在对应渠道里做
+    const wx = ids.filter((i) => i.provider === "wechat");
+    if (wx.length) {
+      const li = el("li", {}, el("span", { textContent: `${t("wechat")} · ${wx.map((i) => `${chan[i.channel] || ""}${i.display_name ? " " + i.display_name : ""}`).join(" / ")}` }));
+      const ops = el("div", { className: "ops" });
+      for (const i of wx) { const ok = !!S.providers?.wechat?.available && S.providers.wechat.mode === (i.channel === "mp" ? "mp" : "qr"); const b = el("button", { className: "text-link", type: "button", textContent: `${t("reverify")}（${chan[i.channel] || ""}）`, disabled: !ok }); b.addEventListener("click", busy(b, () => reverify(i.id))); ops.append(b); }
+      if (canRemove && ids.length > wx.length) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbindWechat") }); b.addEventListener("click", busy(b, () => unbind({ provider: "wechat" }, t("confirmUnbindWechat")))); ops.append(b); }
+      li.append(ops); list.append(li);
+    }
+    for (const i of ids.filter((i) => i.provider !== "wechat")) {
       const li = el("li", {}, el("span", { textContent: `${names[i.provider] || i.provider}${i.display_name ? " · " + i.display_name : ""}` }));
       const ops = el("div", { className: "ops" });
       const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers?.[i.provider]?.available }); rv.addEventListener("click", busy(rv, () => reverify(i.id))); ops.append(rv);
@@ -251,8 +286,10 @@
     }
     root.append(el("h3", { textContent: t("identitiesTitle") }), list);
     const bindRow = el("div", { className: "bind-row" });
-    for (const p of ["google", "dev"]) {
-      if (!S.providers?.[p]?.available || providersHeld.has(p)) continue;
+    for (const p of ["wechat", "google", "dev"]) {
+      if (!S.providers?.[p]?.available) continue;
+      if (p !== "wechat" && providersHeld.has(p)) continue;
+      if (p === "wechat" && wx.some((i) => i.channel === (S.providers.wechat.mode === "mp" ? "mp" : "open"))) continue;   // 当前渠道的微信身份已关联
       const b = el("button", { className: "button small", type: "button", textContent: t("bind") + names[p] });
       b.addEventListener("click", busy(b, async () => {
         if (!S.user.recentlyVerified) return needVerify();
@@ -278,6 +315,39 @@
     const sw = el("button", { className: "text-link", type: "button", textContent: t("switchOther") });
     sw.addEventListener("click", () => openLogin({ intent: "switch", returnTo: "/account" })); root.append(el("h3", { textContent: t("other") }), sw);
 
+    /* ---------- 邀请好友 ---------- */
+    function renderReferral(root) {
+      const sec = el("div", { className: "referral" });
+      root.append(el("h3", { textContent: t("referralTitle") }), sec);
+      fetch("/api/referral").then((r) => r.json()).then((d) => {
+        const r = d.referral; if (!r) return;
+        sec.append(el("p", { className: "muted", textContent: t("referralDesc")(r.days) }));
+        const copyBtn = (text) => { const b = el("button", { className: "text-link", type: "button", textContent: t("copy") }); b.addEventListener("click", async () => { try { await navigator.clipboard.writeText(text); toast(t("copied")); } catch { prompt(t("copy"), text); } }); return b; };
+        const kv2 = el("dl", { className: "kv" });
+        kv2.append(el("dt", { textContent: t("referralCodeLabel") }), el("dd", {}, el("span", { className: "no", textContent: r.code }), " ", copyBtn(r.code)));
+        kv2.append(el("dt", { textContent: t("referralLinkLabel") }), el("dd", {}, el("span", { className: "no", textContent: r.link }), " ", copyBtn(r.link)));
+        sec.append(kv2, el("p", { className: "muted", textContent: t("referralStats")(r.invited, r.earnedDays) + (r.pendingDays > 0 ? " " + t("referralPending")(r.pendingDays) : "") }));
+        if (r.claimed) sec.append(el("p", { className: "muted", textContent: t("referralClaimed")(r.claimed.days) }));
+        else if (r.canClaim) {
+          const input = el("input", { placeholder: t("referralClaimPlaceholder"), maxLength: 12, autocomplete: "off", spellcheck: false });
+          const b = el("button", { className: "button small", type: "button", textContent: t("referralClaimBtn") });
+          b.addEventListener("click", busy(b, async () => {
+            const x = await postJson("/api/referral/claim", { code: input.value });
+            if (!x.ok) return toast(t("referralErrors")[x.error] || t("opFailed"));
+            toast(t("referralClaimed")(x.days)); await bootstrap();
+          }));
+          sec.append(el("h4", { textContent: t("referralClaimTitle") }), el("div", { className: "ops" }, input, b), el("p", { className: "fine", textContent: t("referralClaimHint")(S.plan?.referralClaimDays ?? 7) }));
+        }
+      }).catch(() => {});
+    }
+    /* ---------- 内测微信群 ---------- */
+    function renderWechatGroup(root) {
+      const g = S.user?.wechatGroup; if (!g || (!g.qrUrl && !g.note)) return;
+      const sec = el("div", { className: "wechat-group" });
+      if (g.qrUrl) sec.append(el("img", { src: g.qrUrl, alt: t("wechatGroupTitle") }));
+      sec.append(el("p", { className: "muted", textContent: g.note || t("wechatGroupDesc") }));
+      root.append(el("h3", { textContent: t("wechatGroupTitle") }), sec);
+    }
     async function reverify(identityId) {
       const r = await postJson("/api/account/reverify", { identityId });
       if (r.ok && r.url) return location.assign(r.url);
@@ -301,7 +371,7 @@
     if (op && Om[op]) toast(Om[op], 7000);
     if (login === "required" || (login === "stale" && S.status === "anonymous")) openLogin();
     if (login || op) history.replaceState(null, "", location.pathname + location.hash);
-    if (location.hash === "#pricing" && S.user && !S.user.access.member && $("#account-root")) startPurchase();
+    if (location.hash === "#pricing" && $("#account-root")) $("#order-box")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   window.SiteAuth = { openLogin, bootstrap, state: S, t };

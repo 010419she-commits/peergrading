@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { config } from "./auth/config.ts";
+import { config, wechatOpenReady } from "./auth/config.ts";
 import "./auth/db.ts";
 import { attachBrowser, cleanupBrowsers } from "./auth/browser.ts";
 import { attachUser, noStore, requireAuthApi, requireAccessApi, requireAccessPage } from "./auth/middleware.ts";
@@ -12,10 +12,13 @@ import { requireCsrf } from "./auth/security.ts";
 import { auth, account } from "./auth/routes.ts";
 import { cleanupTx } from "./auth/tx.ts";
 import { billing, paymentWebhook } from "./billing/routes.ts";
+import { admin, isAdmin } from "./billing/admin.ts";
 import { device, cleanupDeviceCodes } from "./auth/device.ts";
 import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
+import { betaFree } from "./billing/settings.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
+import { loadMediaSettings, saveMediaSettings, publicMediaSettings, minimalMediaSettings, createMediaProvider, MEDIA_FILE_RE, mediaMime } from "./agents/media.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor, windowsProcessNames } from "./agents/detect.ts";
 import { submitRelayReply, ignoreRelayText, sendToApp, listRunningApps, markOwnClipboardText, runInTerminal } from "./agents/relay.ts";
 import { getProxyEnv } from "./agents/proxy.ts";
@@ -25,9 +28,11 @@ import { dockerAvailable } from "./finalizer/executor.ts";
 import type { Version } from "./finalizer/types.ts";
 
 const here = config.root;
-const SESSIONS = process.env.SESSIONS_DIR || path.join(here, "sessions");
+const SESSIONS = path.resolve(process.env.SESSIONS_DIR || path.join(here, "sessions"));   // res.sendFile 要绝对路径
 const HOST = process.env.HOST || (localMode ? "127.0.0.1" : "0.0.0.0");
 const runs = new Map<string, AbortController>();
+const liveRuns = new Map<string, number>();   // 进行中的协作 → 所属用户（session.json 写入前，媒体文件就要能看）
+const DATA_DIR = path.dirname(config.dbPath);   // media.json（图片 / 视频生成的 API Key）与 app.db 同目录
 
 const app = express();
 app.set("trust proxy", 1);
@@ -51,11 +56,27 @@ if (localMode) {
   app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${getCloudUrl()}/account`));
 } else {
   app.use(attachUser);
-  app.use(["/api", "/auth", "/login", "/app", "/account", "/device"], noStore);
+  app.use(["/api", "/auth", "/login", "/app", "/account", "/device", "/admin"], noStore);
+  // 邀请链接 /?ref=码：先记在 Cookie 里，首次登录建号时登记邀请
+  app.use((req, res, next) => {
+    const ref = req.query.ref;
+    if (req.method === "GET" && typeof ref === "string" && /^[A-Za-z0-9]{6,16}$/.test(ref)) res.cookie("pg_ref", ref.toUpperCase(), { maxAge: 30 * 86400 * 1000, httpOnly: true, sameSite: "lax", secure: config.isProd, path: "/" });
+    next();
+  });
   app.use(auth);
   app.use("/api/account", account);
   app.use(billing);
   app.use(device);
+  /* ---------- 站主后台 ---------- */
+  app.use(admin);
+  app.get("/admin", (req, res) => {
+    const u = (req as any).user;
+    if (!u) return res.redirect("/login?return_to=%2Fadmin&reason=required");
+    if (!isAdmin(u)) return res.status(404).type("text").send("Not found");
+    res.sendFile(path.join(here, "views", "admin.html"));
+  });
+  // 后台上传的收款码 / 微信群二维码：只给已登录用户看（账号页、订单页、后台）
+  app.use("/uploads", (req, res, next) => ((req as any).user ? next() : res.status(401).type("text").send("Unauthorized")), express.static(config.uploadsDir, { index: false, dotfiles: "deny", maxAge: "1h", setHeaders: (res) => res.set("Cache-Control", "private, max-age=3600") }));
   /* ---------- 软件下载 ---------- */
   const DOWNLOADS = process.env.DOWNLOADS_DIR || path.join(here, "downloads");
   app.use("/download", express.static(DOWNLOADS, { index: false, dotfiles: "deny" }));
@@ -118,6 +139,38 @@ api.get("/sessions/:id", (req, res) => {
 });
 api.post("/stop/:id", requireCsrf, (req, res) => { runs.get(String(req.params.id))?.abort(); res.json({ stopped: runs.has(String(req.params.id)) }); });
 
+/* ---------- 图片 / 视频生成（OpenAI）：设置只存在本机 / 服务器的 data/media.json；桌面模式人人可改，云端仅管理员 ---------- */
+const canEditMedia = (req: express.Request) => localMode || isAdmin((req as any).user);
+api.get("/media/settings", (req, res) => {
+  const s = loadMediaSettings(DATA_DIR);
+  // 非管理员只需要知道能不能用：不给 Key 片段、中转地址与模型名
+  res.json(canEditMedia(req) ? { ...publicMediaSettings(s), canEdit: true } : { ...minimalMediaSettings(s), canEdit: false });
+});
+api.post("/media/settings", requireCsrf, (req, res) => {
+  if (!canEditMedia(req)) return res.status(404).json({ error: "not_found" });
+  const b = req.body || {};
+  const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 500) : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+  const s = saveMediaSettings(DATA_DIR, { apiKey: str(b.apiKey), baseUrl: str(b.baseUrl), imageModel: str(b.imageModel), videoModel: str(b.videoModel), images: bool(b.images), videos: bool(b.videos) });
+  res.json({ ok: true, ...publicMediaSettings(s), canEdit: true });
+});
+/** 协作中生成的图片 / 视频：只给会话所有者看 */
+const sessionOwner = (id: string): number | null => {
+  const f = path.join(SESSIONS, id, "session.json");
+  try { const fd = fs.openSync(f, "r"); const buf = Buffer.alloc(256); const n = fs.readSync(fd, buf, 0, 256, 0); fs.closeSync(fd); const m = buf.subarray(0, n).toString("utf8").match(/"userId":\s*(\d+)/); return m ? Number(m[1]) : null; }
+  catch { return null; }
+};
+api.get("/sessions/:id/media/:file", (req, res) => {
+  const u = (req as any).user;
+  const id = String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, ""), file = String(req.params.file);
+  if (!id || !MEDIA_FILE_RE.test(file)) return res.status(404).json({ error: "not_found" });
+  const owner = liveRuns.get(id) ?? sessionOwner(id);
+  const f = path.join(SESSIONS, id, "media", file);
+  if (owner !== u.id || !fs.existsSync(f)) return res.status(404).json({ error: "not_found" });
+  res.set("Cache-Control", "private, max-age=31536000, immutable");
+  res.type(mediaMime(file)).sendFile(f);
+});
+
 async function buildConfig(raw: any, cwd: string): Promise<RunConfig> {
   const task = String(raw?.task ?? "").trim();
   if (!task) throw new Error("EMPTY_TASK");
@@ -147,12 +200,22 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     try { await reportUsage(id); }
     catch (e: any) { return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
   } else recordUsage(u, id);
+  // 图片 / 视频生成：由界面勾选决定本次是否允许；未配置 API Key 时提示并照常协作
+  const want = { images: !!req.body?.media?.images, videos: !!req.body?.media?.videos };
+  let mediaNote = "";
+  if (want.images || want.videos) {
+    const ms = loadMediaSettings(DATA_DIR);
+    const provider = await createMediaProvider(ms).catch(() => null);
+    if (provider) cfg.media = { provider, dir: path.join(dir, "media"), images: want.images && ms.images, videos: want.videos && ms.videos };
+    else mediaNote = cfg.lang === "zh" ? "未配置图片 / 视频生成的 API Key，本次协作不生成媒体。" : "No API key is configured for image / video generation; this run produces no media.";
+  }
   const ac = new AbortController();
-  runs.set(id, ac);
+  runs.set(id, ac); liveRuns.set(id, u.id);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   const events: Event[] = [];
   const send = (ev: Event) => { events.push(ev); res.write(`data: ${JSON.stringify(ev)}\n\n`); };
   res.write(`data: ${JSON.stringify({ type: "run", id })}\n\n`);
+  if (mediaNote) send({ type: "status", text: mediaNote });
   req.on("close", () => ac.abort());
   let result: Awaited<ReturnType<typeof runCollaboration>> | null = null;
   try { result = await runCollaboration(cfg, send, ac.signal); }
@@ -164,8 +227,10 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     try {
       const strip = (c: any) => ({ ...c, agent: { ...c.agent, runner: undefined } });
       const versionIds = await saveVersions(id, dir, result);
-      fs.writeFileSync(path.join(dir, "session.json"), JSON.stringify({ id, userId: u.id, config: { ...cfg, agentA: strip(cfg.agentA), agentB: strip(cfg.agentB) }, result, events, versionIds }, null, 2));
+      const { media: _m, ...cfgNoMedia } = cfg;   // provider 对象不进 session.json
+      fs.writeFileSync(path.join(dir, "session.json"), JSON.stringify({ id, userId: u.id, config: { ...cfgNoMedia, agentA: strip(cfg.agentA), agentB: strip(cfg.agentB), media: cfg.media ? { images: cfg.media.images, videos: cfg.media.videos } : undefined }, result, events, versionIds }, null, 2));
     } catch (e) { console.error("session save failed", e); }
+    liveRuns.delete(id);
     res.end();
   }
 });
@@ -259,6 +324,6 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
 app.listen(config.port, HOST, () => {
   console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${getCloudUrl()}, paired=${isPaired()})`
-    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
+    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${wechatOpenReady()}, beta=${betaFree()}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

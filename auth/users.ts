@@ -3,7 +3,7 @@ import { q } from "./db.ts";
 import { now, AuthError } from "./security.ts";
 
 export interface VerifiedIdentity {
-  provider: "google" | "dev"; issuer: string; uid: string; channel?: string | null;
+  provider: "google" | "wechat" | "dev"; issuer: string; uid: string; channel?: string | null;
   unionId?: string | null; unionDomain?: string | null; name?: string | null; avatar?: string | null;
 }
 
@@ -72,12 +72,20 @@ export function matchReverify(p: VerifiedIdentity, tx: any) {
   return ident;
 }
 
-/** 解绑：按 identityId 单条。返回被移除的 identity id 列表 */
-export function removeIdentities(userId: number, { identityId }: { identityId?: number }) {
+/** 解绑：wechat 整组（扫码 + 公众号，连同 UnionID 关联）；其他按 identityId 单条。返回被移除的 identity id 列表 */
+export function removeIdentities(userId: number, { provider, identityId }: { provider?: string; identityId?: number }) {
   const all = q("SELECT id, provider FROM identities WHERE user_id = ?").all(userId);
-  const one = all.find((i) => i.id === identityId);
-  if (!one) throw new AuthError("not_found");
-  if (all.length - 1 < 1) throw new AuthError("last_identity");
-  q("DELETE FROM identities WHERE id = ? AND user_id = ?").run(one.id, userId);
-  return [one.id as number];
+  let removing: any[];
+  if (provider === "wechat") removing = all.filter((i) => i.provider === "wechat");
+  else {
+    const one = all.find((i) => i.id === identityId);
+    if (!one) throw new AuthError("not_found");
+    removing = [one];
+  }
+  if (!removing.length) throw new AuthError("not_found");
+  if (all.length - removing.length < 1) throw new AuthError("last_identity");
+  const del = q("DELETE FROM identities WHERE id = ? AND user_id = ?");
+  for (const r of removing) del.run(r.id, userId);
+  if (provider === "wechat") q("DELETE FROM wechat_union_links WHERE user_id = ?").run(userId);
+  return removing.map((r) => r.id as number);
 }

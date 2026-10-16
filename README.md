@@ -25,34 +25,44 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 |---|---|
 | `/` | 首页：理念 / 接入方式 / 流程 / 定价，登录弹窗 |
 | `/app` | 工作台（必须登录，且在试用期内或已购买） |
-| `/account` | 账号：使用权、订单、购买、关联 / 解绑 / 重新验证登录方式 |
+| `/account` | 账号：使用权与剩余天数、订阅方案、邀请码、内测微信群、订单、关联 / 解绑 / 重新验证登录方式 |
+| `/admin` | 站主后台（仅管理员）：内测开关、收款设置、早鸟 / 邀请参数、微信群二维码、用户剩余天数、订单确认、赠送会员 |
 | `/login` | 无 JS 也可用的登录页 |
 | `/terms` `/privacy` | 占位页，正式发布前替换 |
 
 ## 登录与账号（v9 规格）
 
-- Google 登录（面向海外发布；微信登录已移除）；首次登录自动建账号。
+- 微信登录（开放平台「网站应用」扫码；在微信内置浏览器里打开时改用公众号授权）与 Google 登录；首次登录自动建账号。
 - 浏览器认证版本 `auth_epoch`、一次性认证事务、服务端会话（HttpOnly Cookie）、与会话绑定的 CSRF 令牌、返回位置白名单。
-- 账号页支持切换账号、重新验证、绑定 / 解绑，至少保留一种登录方式。
+- 账号页支持切换账号、重新验证、绑定 / 解绑（解绑微信时整组移除），至少保留一种登录方式。
 - 本地开发可用 `DEV_LOGIN=1` 启用“开发者登录”，不需要任何第三方凭证即可走通全部流程；生产环境该入口不存在。
 
-Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部分不再适用）。
+Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-membership.md` §8。微信：在 [open.weixin.qq.com](https://open.weixin.qq.com) 注册开发者账号（需企业资质）→ 创建「网站应用」，授权回调域填 `peergrading.ai` → 审核通过后把 AppID / AppSecret 写进服务器 `.env`（`ssh root@服务器 /srv/peergrading/deploy/set-wechat.sh`，密钥不要经过聊天或代码仓库）。只要 `.env` 里没有微信凭证，登录页就不显示微信按钮。
 
-## 试用与月付
+## 内测免费 → 开放订阅
 
-- 注册后 **3 天内可免费使用 5 次**协作（先到者为准），之后需订阅；`TRIAL_DAYS` / `TRIAL_USES` 可改。
-- 默认 **每月 18 元**（`PLAN_MODE=days`、`PLAN_DAYS=30`、`PRICE_CENTS=1800`）：每次付款延长 30 天，会员期内可提前续费（顺延累加），到期不自动扣费。改 `CURRENCY=USD` 即按美元计价；`PLAN_MODE=permanent` 改为一次买断。自动扣费的订阅需要接 Stripe 等渠道的 subscription，当前未接。
+- **内测免费默认开**：所有登录用户免费使用全部功能，网站不显示购买入口（方案卡片标「内测结束后开放」），下单接口返回 403 `beta_free`，桌面软件不弹付费提示。徽标显示「内测免费」。
+- **开放订阅**：管理员在 `/admin` 关掉「内测免费」即可（或 `.env` 设 `FREE_BETA=0` 作为没有后台设置时的默认值）。关闭那一刻起：按会员 / 试用规则放行，试用结束或会员到期即停止使用；**内测期间注册的用户从关闭时起重新计算试用**（内测期间的用量不计）；内测期间登记的邀请奖励立即发放。
+- **管理员**：`.env` 里 `ADMIN_USER_IDS=<用户 ID>`（账号页「用户 ID」一行可查），或 `npm run grant -- <用户ID> admin permanent`。非管理员访问 `/admin` 得到 404。
+
+## 试用、方案与邀请
+
+- 试用：注册后 **3 天内可免费使用 5 次**协作（先到者为准）；`TRIAL_DAYS` / `TRIAL_USES` 可改。
+- **早鸟终身版**：前 **200 名** ¥99 一次买断、永久使用（`EARLY_BIRD_LIMIT` / `EARLY_BIRD_PRICE_CENTS`，后台可改）。名额 = 已付订单 + 24 小时内的待支付订单；售罄后下单返回 409 `sold_out`，网站显示「已售罄」。
+- **月付**：默认 **每月 18 元**（`PLAN_MODE=days`、`PLAN_DAYS=30`、`PRICE_CENTS=1800`）：每次付款延长 30 天，会员期内可提前续费（顺延累加），到期不自动扣费。改 `CURRENCY=USD` 即按美元计价；`PLAN_MODE=permanent` 改为一次买断。自动扣费的订阅需要接 Stripe 等渠道的 subscription，当前未接。
+- **邀请奖励**：每个用户有 8 位邀请码与邀请链接（`/?ref=码`）。好友通过链接注册（或注册后 7 天内在账号页填码），**双方各得 7 天会员**（`REFERRAL_DAYS`，后台可改）；顺延累加到现有会员期之后。内测期间先登记、内测结束时统一发放。防刷：一个用户只能被邀请一次、不能填自己的码、每人最多因邀请获奖 `REFERRAL_MAX`（默认 20）次。
+- **内测微信群**：后台上传群二维码与说明后，账号页出现「内测微信群」入口。
 - 权益模型按 v9 §5.10 / §6：区间、永久、幂等授予、撤销。
 
 ### 收款怎么接
 
 订单、支付事件、权益发放已按 v9 §6.4 实现（单事务、幂等、验签），支付渠道本身需要商户资质，留了三种接法：
 
-1. **线下 / 扫码收款**：在 `.env` 配 `PAY_INSTRUCTIONS` 与 `PAY_QR_URL`，用户下单后看到订单号与收款码；你确认到账后执行 `npm run confirm-order -- <订单号>`，会员立即生效。
+1. **个人收款（线下 / 扫码）**：在 `/admin` 填付款说明并上传收款码（或 `.env` 的 `PAY_INSTRUCTIONS` / `PAY_QR_URL`），用户下单后看到订单号、方案、金额与收款码；你在 `/admin` 的订单列表点「确认到账」（或执行 `npm run confirm-order -- <订单号>`），会员立即生效。
 2. **支付回调**：`POST /api/payments/webhook`，raw body 用 `PAYMENT_WEBHOOK_SECRET` 做 HMAC-SHA256，签名放 `x-signature` 头；body 为 `{event_id, merchant_order_no, amount_cents, currency, provider_txn_id, provider}`。接微信支付 / 支付宝时把它们的验签逻辑替换进 `billing/orders.ts` 的 `verifyWebhookSignature`。
 3. **本地模拟**：`npm run dev` 下订单面板有“模拟支付成功”按钮，用于验证整条链路。
 
-运维脚本：`npm run users`（用户与权益）、`npm run grant -- <userId> member <days|permanent>`（手动发权益）。
+运维脚本：`npm run users`（用户、状态与剩余天数）、`npm run grant -- <userId> member <days|permanent>`（手动发权益；后台用户列表也能直接赠送天数 / 永久）。
 
 ## 自动识别规则（以 agent 为单位）
 
@@ -100,17 +110,24 @@ Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部
 - 左侧时间线实时流式显示全部发言，等待时显示已等待秒数与模型推理进度；右侧是各版本成果，结束后定位最终版。
 - 会话按用户保存在 `sessions/<时间>/session.json`，可回放。
 
+### 协作中生成图片 / 视频
+
+- 侧栏「图片 / 视频生成」里填 OpenAI API Key（桌面版任何人可填，网页版仅管理员；也可用 `.env` 的 `MEDIA_API_KEY` / `OPENAI_API_KEY`）。Key 只写进本机 / 服务器 `data/media.json`（0600），前端只看到首尾几位。
+- 勾选「允许生成图片 / 视频」后，系统提示词多出第 6 条规则：成果需要配图或视频时，智能体写 ```` ```image aspect=16:9 ```` / ```` ```video seconds=8 ```` 围栏描述画面，服务端在每条发言结束后调用 `gpt-image-1` / `sora-2` 生成，把围栏替换成 `![描述](media://文件名)`。替换后的正文进入对方的上下文与成果版本，所以另一位智能体审查时看到的是同一个引用，修改成果时按规则原样保留。
+- 文件存在 `sessions/<时间>/media/`（桌面版在应用数据目录下的 `sessions/`），只有会话所有者能通过 `/api/sessions/:id/media/:file` 读取；相同描述在同一次协作中只生成一次。每条消息最多 3 图 1 视频，每次协作合计最多 6 图 2 视频（`MEDIA_MAX_IMAGES` / `MEDIA_MAX_VIDEOS`，只按成功次数计）；失败、超限或未开启时围栏被替换为一行说明（按协作语言给出原因），协作照常进行；用户点「停止」时正在进行的生成随之取消。目前没有自动清理：删除会话目录即可连同其中的媒体一起删掉。
+- 请求走系统代理（`HTTPS_PROXY` / `NO_PROXY`），`MEDIA_BASE_URL` 可指向兼容 OpenAI 的中转站。
+
 ## 文件
 
 - `server.ts` — Express 服务：静态站点、登录、账号、付费、受保护的协作接口
 - `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`；`device`（桌面软件配对，云端）；`localmode`（桌面模式，本机）
 - `desktop/main.cjs` — Electron 外壳；`views/pair.html` — 配对页
-- `billing/` — 试用与使用权、订单与支付事件处理、定价 / 下单 / 回调接口
-- `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）
+- `billing/` — `settings`（站点设置：内测开关等）`access`（使用权）`catalog`（方案：早鸟 / 常规）`orders`（订单与支付事件）`referral`（邀请奖励）`plan`（公开方案信息）`routes`（定价 / 下单 / 回调 / 邀请）`admin`（站主后台接口）
+- `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）、图片 / 视频生成（`media` 围栏解析与流水线、`media-openai` 接口、`http` 带代理的 fetch）
 - `finalizer/` — 收尾 Agent：`types` `extract`（围栏识别与布局）`validate`（计划校验、路径与文件快照、机器检查）`executor`（Docker / 宿主执行）`service`（版本冻结、主流程、报告）`agent`（接入项目 agent）
 - `orchestrator.ts` — 协作循环与中英文提示词
-- `public/` — 首页 `index.html` + `site.css` + `site.js` + `site-i18n.js`；账号页；工作台脚本 `app.js` / `style.css` / `i18n.js`
-- `views/app.html` — 工作台页面（仅经鉴权路由返回）
+- `public/` — 首页 `index.html` + `site.css` + `site.js` + `site-i18n.js`；账号页；后台脚本 `admin.js`；工作台脚本 `app.js` / `style.css` / `i18n.js`
+- `views/app.html` — 工作台页面（仅经鉴权路由返回）；`views/admin.html` — 站主后台（仅管理员）
 - `scripts/` — `grant-entitlement` `confirm-order` `list-users`
 - `docs/` — 两份评审稿原文
 

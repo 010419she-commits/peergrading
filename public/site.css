@@ -242,3 +242,13 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 .nav-auth { flex-wrap: nowrap; }
 .nav-auth .text-link { min-height: 36px; font-size: 14px; }
 @media (max-width: 1279px) { .nav-auth .user-name, .nav-auth .badge { display: none; } }
+/* 方案卡片（首页定价区与账号页共用）、邀请、微信群 */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; width: 100%; }
+.plans .plan { padding: 24px 22px; gap: 10px; }
+.plans .price { font-size: clamp(32px, 4vw, 44px); }
+.plans .plan p { margin: 0; font-size: 14px; }
+.account .plans { margin-bottom: 16px; }
+.account h4 { margin: 24px 0 10px; font-size: 15px; font-weight: 500; }
+.referral input { min-height: 40px; padding: 7px 12px; border: 1px solid var(--control-line); background: var(--bg); color: var(--ink); font-size: 15px; letter-spacing: .08em; text-transform: uppercase; width: 12em; max-width: 100%; }
+.referral .no, .order .no { font-family: ui-monospace, Menlo, monospace; letter-spacing: .06em; overflow-wrap: anywhere; }
+.wechat-group img { display: block; max-width: 220px; margin-bottom: 12px; border: 1px solid var(--line); }

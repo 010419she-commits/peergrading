@@ -30,6 +30,11 @@ export const config = {
   sessionSecret,
   dbPath: path.join(dataDir, "app.db"),
   google: { clientId: process.env.GOOGLE_CLIENT_ID || "", clientSecret: process.env.GOOGLE_CLIENT_SECRET || "" },
+  /** 微信登录：open = 开放平台「网站应用」扫码登录（必填项）；mp = 公众号（微信内置浏览器里登录，可选） */
+  wechat: {
+    open: { appId: process.env.WECHAT_OPEN_APPID || "", secret: process.env.WECHAT_OPEN_SECRET || "", unionDomain: process.env.WECHAT_OPEN_UNION_DOMAIN || "" },
+    mp:   { appId: process.env.WECHAT_MP_APPID || "",   secret: process.env.WECHAT_MP_SECRET || "",   unionDomain: process.env.WECHAT_MP_UNION_DOMAIN || "" },
+  },
   /** 本地开发登录（无需任何第三方凭证）。仅当非生产 + BASE_URL 为 localhost + DEV_LOGIN=1 */
   devLogin: !isProd && isLocalBase && process.env.DEV_LOGIN === "1",
   /** 云端的网页版工作台（用服务器上的 agent）。产品主体是桌面软件，生产默认关闭 */
@@ -61,6 +66,16 @@ export const config = {
     instructions: process.env.PAY_INSTRUCTIONS || "",
     qrUrl: process.env.PAY_QR_URL || "",
   },
+  /** 早鸟终身版：前 N 名一次买断（后台可改） */
+  earlyBird: { limit: Number(process.env.EARLY_BIRD_LIMIT || 200), priceCents: Number(process.env.EARLY_BIRD_PRICE_CENTS || 9900) },
+  /** 邀请奖励：双方各得 N 天会员；每人最多因邀请获奖 maxPerUser 次；被邀请者须在注册 claimDays 天内填码 */
+  referral: { days: Number(process.env.REFERRAL_DAYS || 7), maxPerUser: Number(process.env.REFERRAL_MAX || 20), claimDays: Number(process.env.REFERRAL_CLAIM_DAYS || 7) },
+  /** 站主后台 /admin：ADMIN_USER_IDS=1,2 或给用户授予 admin 权益（npm run grant -- <id> admin permanent） */
+  adminUserIds: (process.env.ADMIN_USER_IDS || "").split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0),
+  /** 后台上传的收款码 / 微信群二维码 */
+  uploadsDir: path.join(dataDir, "uploads"),
 };
 
 export const googleReady = () => !!(config.google.clientId && config.google.clientSecret);
+export const wechatOpenReady = () => !!(config.wechat.open.appId && config.wechat.open.secret);
+export const wechatMpReady = () => !!(config.wechat.mp.appId && config.wechat.mp.secret);

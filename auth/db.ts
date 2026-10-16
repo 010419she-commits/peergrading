@@ -173,3 +173,26 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_id, kind);
 `);
+db.exec(`
+-- 站点设置（后台 /admin 可改）：内测开关、收款说明、早鸟名额、邀请天数、微信群入口
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+-- 邀请：一个用户只能被邀请一次；奖励天数在内测结束时（或立即）发放为会员权益
+CREATE TABLE IF NOT EXISTS referrals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  inviter_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  invitee_id   INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  code         TEXT NOT NULL,
+  inviter_days INTEGER NOT NULL,
+  invitee_days INTEGER NOT NULL,
+  created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+  settled_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id);
+`);
+// 旧库升级：users.referral_code（邀请码，首次查看时生成）
+if (!(db.prepare("PRAGMA table_info(users)").all() as any[]).some((c) => c.name === "referral_code")) db.exec("ALTER TABLE users ADD COLUMN referral_code TEXT");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)");

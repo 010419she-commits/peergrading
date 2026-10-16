@@ -6,20 +6,27 @@ import { ensureBrowser, bumpEpoch } from "./browser.ts";
 import { issueCsrf, requireCsrf, safeReturnTo, AuthError, logAuthError, randomToken } from "./security.ts";
 import { requireBrowser, requireAuthApi } from "./middleware.ts";
 import { googleAuthUrl, googleCallback } from "./google.ts";
+import { wechatAuthUrl, wechatCallback, wechatMode, isWechatUA } from "./wechat.ts";
 import { devAuthUrl, devAuthorizePage, devCallback, devReady } from "./dev.ts";
 import { revokeSession, clearSessionCookie, recentlyVerified, revokeAllSessions, insertSession, setSessionCookie } from "./session.ts";
 import { listIdentities, getIdentity, removeIdentities } from "./users.ts";
 import { entitlementSummary } from "./entitlements.ts";
 import { invalidateUserTx } from "./tx.ts";
 import { accessStatus } from "../billing/access.ts";
-import { publicPlan } from "../billing/plan.ts";
+import { publicPlan, wechatGroupInfo } from "../billing/plan.ts";
 
 export const auth = Router();
 export const account = Router();
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 
-export function providersFor(_req: Request) {
-  return { google: { available: googleReady(), hint: null as string | null }, dev: { available: devReady() } };
+export function providersFor(req: Request) {
+  const inWechat = isWechatUA(req), mode = wechatMode(req);
+  return {
+    inWechat,
+    google: { available: googleReady(), hint: inWechat ? "微信内置浏览器可能无法完成 Google 登录，请在系统浏览器中打开本页" : null as string | null },
+    wechat: { available: !!mode, mode: mode === "mp" ? "mp" : mode === "open" ? "qr" : null },
+    dev: { available: devReady() },
+  };
 }
 export function meJson(req: Request) {
   const r = req as any;
@@ -27,12 +34,12 @@ export function meJson(req: Request) {
   return { user: {
     id: r.user.id, name: r.user.display_name, avatar: r.user.avatar_url, createdAt: r.user.created_at,
     identities: listIdentities(r.user.id), entitlements: entitlementSummary(r.user.id),
-    access: accessStatus(r.user),
+    access: accessStatus(r.user), wechatGroup: wechatGroupInfo(),
     recentlyVerified: recentlyVerified(r.session), verifiedBy: r.session.verified_by_identity_id,
   } };
 }
 const authUrlFor = (provider: string, req: Request, opts: any) =>
-  provider === "google" ? googleAuthUrl(req, opts) : provider === "dev" ? devAuthUrl(req, opts) : null;
+  provider === "google" ? googleAuthUrl(req, opts) : provider === "wechat" ? wechatAuthUrl(req, opts) : provider === "dev" ? devAuthUrl(req, opts) : null;
 
 auth.get("/api/auth/bootstrap", (req, res) => {
   const r = req as any;
@@ -57,7 +64,8 @@ auth.get("/login", (req, res) => {
       <input type="hidden" name="intent" value="${intent}"><input type="hidden" name="return_to" value="${esc(returnTo)}">
       <button class="button button-provider" type="submit">${label}</button></form>`;
   const buttons = [
-    p.google.available ? form("google", "Google 登录") : "",
+    p.wechat.available ? form("wechat", p.wechat.mode === "mp" ? "微信登录" : "微信扫码登录") : "",
+    p.google.available ? form("google", "Google 登录") + (p.google.hint ? `<p class="fine">${esc(p.google.hint)}</p>` : "") : "",
     p.dev.available ? form("dev", "开发者登录（仅本地）") : "",
   ].join("") || '<p class="muted">登录功能尚未开放。</p>';
   const notice = req.query.reason === "required" ? '<p class="muted">该页面需要登录后访问。</p>' : "";
@@ -75,7 +83,7 @@ auth.post("/api/auth/start", requireBrowser, requireCsrf, (req, res) => {
   const trace = randomToken(6);
   try {
     const { provider, intent } = req.body || {};
-    if (!["google", "dev"].includes(provider) || !["login", "switch"].includes(intent)) throw new AuthError("bad_request");
+    if (!["google", "wechat", "dev"].includes(provider) || !["login", "switch"].includes(intent)) throw new AuthError("bad_request");
     if (intent === "login" && r.session) throw new AuthError("already_authenticated");
     if (intent === "switch" && !r.session) throw new AuthError("unauthenticated");
     const url = authUrlFor(provider, req, { intent, returnTo: req.body.return_to, userId: intent === "switch" ? r.user.id : null });
@@ -91,6 +99,7 @@ auth.post("/api/auth/start", requireBrowser, requireCsrf, (req, res) => {
 });
 auth.get("/auth/:provider/start", (req, res) => res.redirect(`/login?return_to=${encodeURIComponent(safeReturnTo(req.query.return_to))}`));
 auth.get("/auth/google/callback", googleCallback);
+auth.get("/auth/wechat/callback", wechatCallback);
 auth.get("/auth/dev/authorize", devAuthorizePage);
 auth.get("/auth/dev/callback", devCallback);
 
@@ -114,7 +123,12 @@ account.post("/reverify", (req, res) => {
     const ident = getIdentity(Number(req.body?.identityId));
     if (!ident || ident.user_id !== r.user.id) throw new AuthError("not_found");
     const opts: any = { intent: "reverify", returnTo: "/account", userId: r.user.id, targetIdentityId: ident.id, targetLinkVersion: ident.link_version };
-    const url = authUrlFor(ident.provider, req, opts);
+    let url: string | null;
+    if (ident.provider === "wechat") {
+      // 微信身份按渠道重新验证：扫码身份只能在普通浏览器里验，公众号身份只能在微信里验
+      if (wechatMode(req) !== ident.channel) throw new AuthError("channel_unavailable");
+      url = wechatAuthUrl(req, { ...opts, channel: ident.channel });
+    } else url = authUrlFor(ident.provider, req, opts);
     if (!url) throw new AuthError("provider_unavailable");
     res.json({ url });
   } catch (e) { fail(res, e, trace); }
@@ -131,7 +145,7 @@ account.post("/unbind", requireRecent, (req, res) => {
   const r = req as any; const trace = randomToken(6);
   try {
     const body = req.body || {};
-    const sel = { identityId: Number(body.identityId) };
+    const sel = body.provider === "wechat" ? { provider: "wechat" } : { identityId: Number(body.identityId) };   // 微信整组解绑（扫码 + 公众号）
     const out = transaction(() => {
       const removed = removeIdentities(r.user.id, sel);
       invalidateUserTx(r.user.id);

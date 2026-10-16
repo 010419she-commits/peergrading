@@ -6,6 +6,7 @@ import { now, AuthError } from "./security.ts";
 import { currentEpoch, bumpEpoch } from "./browser.ts";
 import { insertSession, revokeSession, readSession } from "./session.ts";
 import { resolveLogin, bindIdentity, matchReverify, type VerifiedIdentity } from "./users.ts";
+import { claimReferral } from "../billing/referral.ts";
 
 function finish(req: Request, tx: any, identity: VerifiedIdentity): { redirect: string; sessionToken: string | null } {
   return transaction(() => {
@@ -34,6 +35,11 @@ function finish(req: Request, tx: any, identity: VerifiedIdentity): { redirect: 
     if (tx.intent === "switch" && !session) throw new AuthError("stale_tx");
     const { user, identity: ident, created } = resolveLogin(identity);
     if (user.status !== "active") throw new AuthError("account_disabled");
+    if (created) {
+      // 通过邀请链接（/?ref=码）来的新用户：登记邀请，奖励按内测状态立即发放或内测结束后发放
+      const code = (req as any).cookies?.pg_ref;
+      if (typeof code === "string" && code) { try { claimReferral(user.id, code); } catch {} }
+    }
     if (session) revokeSession(session.id);
     const s = insertSession(user.id, { lastVerifiedAt: now(), verifiedBy: ident.id });
     bumpEpoch(tx.bid_hash, s.id);

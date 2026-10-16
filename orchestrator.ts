@@ -1,6 +1,7 @@
 // orchestrator.ts — 双 Agent「作者 / 审查者」轮换协作循环（后端无关）
 import type { AgentInfo, Backend, Lang, Turn } from "./agents/types.ts";
 import { createBackend } from "./agents/backends.ts";
+import { newMediaRun, processMedia, MEDIA_LIMITS, type MediaEvent, type MediaProvider, type MediaRecord, type MediaRun } from "./agents/media.ts";
 
 export type AgentKey = "A" | "B";
 
@@ -18,6 +19,8 @@ export interface RunConfig {
   maxRounds: number;
   discussionTurns: number;
   cwd: string;          // CLI 类智能体的工作目录
+  /** 协作中生成图片 / 视频：agent 用 ```image / ```video 围栏描述画面，由 provider 生成后存到 dir */
+  media?: { provider: MediaProvider; dir: string; images: boolean; videos: boolean };
 }
 
 export type Kind = "draft" | "review" | "reply" | "counter" | "revision";
@@ -27,7 +30,8 @@ export type Event =
   | { type: "message_start"; id: string; agent: AgentKey; name: string; model: string; source: string; kind: Kind; round: number }
   | { type: "delta"; id: string; text: string }
   | { type: "progress"; id: string; phase: "reasoning" | "running"; chars?: number }
-  | { type: "message_end"; id: string; verdict?: "approve" | "revise"; model?: string; usage?: { input: number; output: number } }
+  | { type: "message_end"; id: string; verdict?: "approve" | "revise"; model?: string; usage?: { input: number; output: number }; text?: string }   // text：媒体围栏被替换后的最终正文（仅在有替换时给出）
+  | MediaEvent
   | { type: "version"; n: number; agent: AgentKey; name: string; content: string }
   | { type: "relay_wait"; id: string; agent: AgentKey; name: string; requestId: string; mode: "manual" | "clipboard"; first: boolean; text: string }
   | { type: "relay_candidate"; id: string; requestId: string; text: string }
@@ -58,7 +62,7 @@ function parseVerdict(text: string): "approve" | "revise" {
 
 const P = {
   zh: {
-    system: (self: string, other: string, persona: string, task: string) => [
+    system: (self: string, other: string, persona: string, task: string, media = "") => [
       `你是「${self}」，正在与另一位 AI 智能体「${other}」协作完成用户交付的任务。`,
       `两位智能体轮流担任「作者」与「审查者」：作者产出成果；审查者严格审查并与作者讨论；随后由审查者亲自修改出新版本，再交回对方审查。如此往复，直到成果足够完善。`,
       ``,
@@ -68,6 +72,7 @@ const P = {
       `3. 讨论阶段要坦诚：同意就说明原因，不同意就给出理由和替代方案。目标是把任务做到最好，而不是赢得争论。`,
       `4. 不要调用任何工具、不要读写文件，只用文字作答。使用与任务相同的语言；若不明确，使用中文。`,
       `5. 成果中若含代码：每个交付文件只输出一份完整内容，代码围栏标注 title=<相对路径>（例如 \`\`\`python title=main.py）。示例、旧代码及运行输出明确标注 role=example、role=old、role=output。`,
+      media,
       persona.trim() ? `\n你的额外人设/关注点：${persona.trim()}` : ``,
       ``, `用户的原始任务如下：`, `<task>\n${task}\n</task>`,
     ].join("\n"),
@@ -88,9 +93,17 @@ const P = {
     s_approved2: (r: number, who: string, n: number) => `第 ${r} 轮讨论后：「${who}」认可第 ${n} 版，协作结束。`,
     s_revise: (r: number, who: string, n: number) => `第 ${r} 轮：「${who}」根据讨论修改，产出第 ${n} 版…`,
     s_max: (m: number, n: number) => `已达到最大轮数（${m}），以第 ${n} 版作为最终成果。`,
+    mediaRule: (images: boolean, videos: boolean) => {
+      const kinds = [images ? "图片" : "", videos ? "视频" : ""].filter(Boolean).join("或");
+      const lines = [`6. 成果需要${kinds}时，不要写"此处应有图"，而是用围栏请求生成，系统会自动生成并把围栏替换成 ![描述](media://…) 引用，另一位智能体与用户都能看到。`];
+      if (images) lines.push(`   图片：\`\`\`image aspect=16:9（可选 1:1 / 16:9 / 9:16，可加 quality=low|medium|high），下一行起写完整、具体的画面描述（主体、场景、风格、光线、构图），再以 \`\`\` 结束。`);
+      if (videos) lines.push(`   视频：\`\`\`video seconds=8 aspect=16:9（seconds 可为 4 / 8 / 12），下一行起写镜头与画面描述。`);
+      lines.push(`   修改成果时原样保留已生成的 ![…](media://…) 引用，只有需要新的或不同的画面时才再写围栏。每条消息最多 ${MEDIA_LIMITS.perMessageImages} 张图、${MEDIA_LIMITS.perMessageVideos} 个视频；本次协作合计最多 ${MEDIA_LIMITS.perRunImages} 张图、${MEDIA_LIMITS.perRunVideos} 个视频。${!videos ? "视频生成未开启。" : ""}${!images ? "图片生成未开启。" : ""}`);
+      return lines.join("\n");
+    },
   },
   en: {
-    system: (self: string, other: string, persona: string, task: string) => [
+    system: (self: string, other: string, persona: string, task: string, media = "") => [
       `You are "${self}", collaborating with another AI agent, "${other}", on a task from the user.`,
       `The two agents alternate between the roles of author and reviewer: the author produces the deliverable; the reviewer critiques it and discusses with the author; then the reviewer personally revises it into a new version and hands it back for the other to review. This repeats until the work is excellent.`,
       ``,
@@ -100,6 +113,7 @@ const P = {
       `3. In discussion, be candid: explain why you agree, or give reasons and alternatives when you disagree. The goal is the best result, not winning the argument.`,
       `4. Do not call tools or touch files; answer in text only. Use the language of the task; if unclear, use English.`,
       `5. If the deliverable contains code: output each delivered file exactly once and in full, and tag its code fence with title=<relative path> (e.g. \`\`\`python title=main.py). Mark examples, old code and program output with role=example, role=old or role=output.`,
+      media,
       persona.trim() ? `\nYour extra persona / focus: ${persona.trim()}` : ``,
       ``, `The user's original task:`, `<task>\n${task}\n</task>`,
     ].join("\n"),
@@ -120,6 +134,14 @@ const P = {
     s_approved2: (r: number, who: string, n: number) => `Round ${r}: after discussion, "${who}" approved version ${n}. Done.`,
     s_revise: (r: number, who: string, n: number) => `Round ${r}: "${who}" revises based on the discussion → version ${n}…`,
     s_max: (m: number, n: number) => `Reached the maximum of ${m} rounds; version ${n} is the final deliverable.`,
+    mediaRule: (images: boolean, videos: boolean) => {
+      const kinds = [images ? "an image" : "", videos ? "a video" : ""].filter(Boolean).join(" or ");
+      const lines = [`6. When the deliverable needs ${kinds}, do not write "image goes here": request it with a fenced block. The system generates it and replaces the block with an ![description](media://…) reference that the other agent and the user can see.`];
+      if (images) lines.push(`   Image: \`\`\`image aspect=16:9 (1:1 / 16:9 / 9:16; optional quality=low|medium|high), then from the next line a complete, concrete description (subject, scene, style, lighting, composition), closed with \`\`\`.`);
+      if (videos) lines.push(`   Video: \`\`\`video seconds=8 aspect=16:9 (seconds 4 / 8 / 12), then the shot and scene description.`);
+      lines.push(`   When revising, keep existing ![…](media://…) references as they are; write a new block only for a new or different picture. At most ${MEDIA_LIMITS.perMessageImages} images and ${MEDIA_LIMITS.perMessageVideos} video per message; at most ${MEDIA_LIMITS.perRunImages} images and ${MEDIA_LIMITS.perRunVideos} videos in the whole run.${!videos ? " Video generation is off." : ""}${!images ? " Image generation is off." : ""}`);
+      return lines.join("\n");
+    },
   },
 };
 
@@ -134,9 +156,10 @@ class Agent {
   private signal: AbortSignal;
   private lang: Lang;
   private cwd: string;
+  private media: MediaRun | null;
 
-  constructor(key: AgentKey, cfg: AgentConfig, system: string, emit: Emit, signal: AbortSignal, lang: Lang, cwd: string, backend?: Backend) {
-    this.key = key; this.cfg = cfg; this.system = system; this.emit = emit; this.signal = signal; this.lang = lang; this.cwd = cwd;
+  constructor(key: AgentKey, cfg: AgentConfig, system: string, emit: Emit, signal: AbortSignal, lang: Lang, cwd: string, backend?: Backend, media: MediaRun | null = null) {
+    this.key = key; this.cfg = cfg; this.system = system; this.emit = emit; this.signal = signal; this.lang = lang; this.cwd = cwd; this.media = media;
     this.backend = backend ?? createBackend(cfg.agent.runner, {
       emit: (ev) => this.emit({ ...ev, id: this.currentId, agent: this.key, name: this.cfg.name }),
     });
@@ -154,10 +177,16 @@ class Agent {
       onDelta: (text) => this.emit({ type: "delta", id, text }),
       onProgress: (p) => this.emit({ type: "progress", id, ...p }),
     });
-    this.turns.push({ role: "assistant", text: res.text });
-    const verdict = kind === "review" || kind === "counter" ? parseVerdict(res.text) : undefined;
-    this.emit({ type: "message_end", id, verdict, model: res.model, usage: res.usage });
-    return res.text;
+    // 媒体围栏 → 生成 → 替换为引用；替换后的正文进入双方后续对话与成果
+    let text = res.text;
+    if (this.media) {
+      try { text = await processMedia(res.text, this.media, id, (ev) => this.emit(ev)); }
+      catch (e: any) { if (this.signal.aborted) throw e; this.emit({ type: "status", text: String(e?.message ?? e) }); }
+    }
+    this.turns.push({ role: "assistant", text });
+    const verdict = kind === "review" || kind === "counter" ? parseVerdict(text) : undefined;
+    this.emit({ type: "message_end", id, verdict, model: res.model, usage: res.usage, ...(text !== res.text ? { text } : {}) });
+    return text;
   }
 }
 
@@ -166,6 +195,7 @@ export interface RunResult {
   finalVersion: number;
   reason: string;
   approved: boolean;   // 最终版是否经审查者判定「通过」（false = 达到最大轮数）
+  media: MediaRecord[];   // 本次协作生成的图片 / 视频
 }
 
 export async function runCollaboration(
@@ -173,8 +203,11 @@ export async function runCollaboration(
   backends?: { A: Backend; B: Backend },   // 仅用于测试注入
 ): Promise<RunResult> {
   const T = P[cfg.lang];
-  const A = new Agent("A", cfg.agentA, T.system(cfg.agentA.name, cfg.agentB.name, cfg.agentA.persona, cfg.task), emit, signal, cfg.lang, cfg.cwd, backends?.A);
-  const B = new Agent("B", cfg.agentB, T.system(cfg.agentB.name, cfg.agentA.name, cfg.agentB.persona, cfg.task), emit, signal, cfg.lang, cfg.cwd, backends?.B);
+  const m = cfg.media && (cfg.media.images || cfg.media.videos) ? cfg.media : null;
+  const mediaRun = m ? newMediaRun(m.provider, m.dir, cfg.lang, signal, { images: m.images, videos: m.videos }) : null;
+  const rule = m ? T.mediaRule(m.images, m.videos) : "";
+  const A = new Agent("A", cfg.agentA, T.system(cfg.agentA.name, cfg.agentB.name, cfg.agentA.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.A, mediaRun);
+  const B = new Agent("B", cfg.agentB, T.system(cfg.agentB.name, cfg.agentA.name, cfg.agentB.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.B, mediaRun);
 
   const versions: RunResult["versions"] = [];
   const pushVersion = (agent: Agent, content: string) => {
@@ -227,5 +260,5 @@ export async function runCollaboration(
     emit({ type: "status", text: reason });
   }
   emit({ type: "done", reason, finalVersion: current.n });
-  return { versions, finalVersion: current.n, reason, approved };
+  return { versions, finalVersion: current.n, reason, approved, media: mediaRun?.records ?? [] };
 }
