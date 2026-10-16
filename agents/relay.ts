@@ -42,12 +42,13 @@ const normalizeEol = (s: string) => s.replace(/\r\n?/g, "\n");
 /** 运行一段 PowerShell。脚本以 -EncodedCommand（UTF-16LE base64）传入，不受命令行引号规则影响 */
 function psRun(script: string, input?: string, opts: { env?: NodeJS.ProcessEnv; timeout?: number } = {}): Promise<{ ok: boolean; out: string; err: string }> {
   return new Promise((resolve) => {
-    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    // 统一把输出编码设成 UTF-8：PowerShell 5.1 默认按本地代码页（中文系统是 GBK）输出，Node 这边按 UTF-8 读会变成乱码
+    const encoded = Buffer.from(`[Console]::OutputEncoding = [Text.Encoding]::UTF8\n${script}`, "utf16le").toString("base64");
     const child = execFile(POWERSHELL, ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
       { maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: opts.env, timeout: opts.timeout },
       (err, stdout, stderr) => {
         // 报错优先给 PowerShell 自己的 stderr；execFile 的 message 里带着整段 base64 命令行，没有信息量
-        const detail = String(stderr ?? "").trim();
+        const detail = String(stderr ?? "").split(/\r?\n/).map((x) => x.trim()).find(Boolean) ?? "";   // 只要第一行，不要 "At line:… + ~~~" 那一堆
         const msg = err ? (detail || ((err as any).killed ? "powershell timed out" : String(err.message).split("\n")[0].replace(/ -EncodedCommand \S+/, ""))) : detail;
         resolve({ ok: !err, out: String(stdout ?? ""), err: msg });
       });
@@ -61,7 +62,7 @@ function pb(cmd: "pbcopy" | "pbpaste", input?: string): Promise<string> {
     // Windows：通过 PowerShell 读写剪贴板（UTF-8）。写入时换行转成 CRLF（Windows 程序的惯例）；
     // 读取时用 [Console]::Out.Write 而不是默认输出，否则 PowerShell 会在末尾多补一个换行，导致读回的内容与我们写入的不相等
     if (cmd === "pbcopy") return ps("[Console]::InputEncoding=[Text.Encoding]::UTF8; $t=[Console]::In.ReadToEnd(); Set-Clipboard -Value $t", (input ?? "").replace(/\r?\n/g, "\r\n"));
-    return ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $t = Get-Clipboard -Raw; if ($t -ne $null) { [Console]::Out.Write([string]$t) }").then((t) => t.replace(/\r\n/g, "\n"));
+    return ps("$t = Get-Clipboard -Raw; if ($t -ne $null) { [Console]::Out.Write([string]$t) }").then((t) => t.replace(/\r\n/g, "\n"));
   }
   return new Promise((resolve) => {
     const child = execFile(cmd, [], { maxBuffer: 16 * 1024 * 1024, env: PB_ENV }, (err, stdout) => resolve(err ? "" : stdout));
@@ -80,7 +81,7 @@ function osascript(script: string): Promise<string> {
 /** 当前正在运行的、有窗口的应用名（供用户选择目标应用） */
 export async function listRunningApps(): Promise<string[]> {
   if (isWin) {
-    const out = await ps("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty ProcessName -Unique");
+    const out = await ps("Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty ProcessName -Unique");
     const skip = new Set(["explorer", "powershell", "cmd", "WindowsTerminal", "PeerGrading", "electron"]);
     return out.split(/\r?\n/).map((n) => n.trim()).filter((n) => n && !skip.has(n)).sort((a, b) => a.localeCompare(b));
   }
@@ -99,11 +100,12 @@ export async function sendToApp(text: string, app?: string, processNames: string
   const safe = app.replace(/["']/g, "");
   if (isWin) {
     const names = [...new Set([...processNames, safe].map((n) => n.replace(/\.exe$/i, "").replace(/["']/g, "")))];
+    const like = safe.replace(/[\[\]*?`]/g, "`$&");   // -like 的通配符用反引号转义（单引号字符串里反引号是普通字符，-like 自己会解释）
     const list = names.map((n) => `'${n}'`).join(",");
     // 先按进程名找有窗口的进程，再按窗口标题；最小化的窗口先还原（AppActivate 只给焦点，不还原）
     const r = await psRun(`$names = @(${list})
 $p = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($names -contains $_.ProcessName) } | Select-Object -First 1
-if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*' } | Select-Object -First 1 }
+if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like '*${like}*' } | Select-Object -First 1 }
 if ($p) {
   Add-Type -Namespace PG -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);'
   $h = $p.MainWindowHandle

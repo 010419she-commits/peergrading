@@ -6,7 +6,7 @@ import { execFile, spawn } from "node:child_process";
 import type { AgentInfo, RunnerSpec, Text } from "./types.ts";
 import { clipboardAvailable } from "./relay.ts";
 import { getProxyEnv, proxyEnvPrefix } from "./proxy.ts";
-import { WIN, POWERSHELL, findBin, spawnCli, killTree, quoteForDisplay, stripNestedClaudeEnv } from "./launch.ts";
+import { WIN, POWERSHELL, findBin, spawnCli, killTree, quoteForDisplay, stripNestedClaudeEnv, resetLaunchers } from "./launch.ts";
 
 export { findBin, needsShell } from "./launch.ts";
 
@@ -546,6 +546,7 @@ const SCAN_MODELS = process.env.SCAN_MODELS === "1";   // 默认只扫描 agent�
 export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
   if (!refresh && cache && Date.now() - cache.at < TTL) return cache.agents;
   if (inflight) return inflight;
+  if (refresh) resetLaunchers();   // CLI 升级后包装脚本背后的目标可能变了
   inflight = (async () => {
     const qwenBin = findBin("qwen");
     const [claude, qwen, cdx, kimiApi, lm, ollama] = await Promise.all([

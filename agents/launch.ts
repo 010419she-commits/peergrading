@@ -1,5 +1,5 @@
 // agents/launch.ts — 找到并启动命令行 agent，重点处理 Windows：
-//  · 可执行文件只认 .exe / .cmd / .bat / .com（npm 还会生成一个无扩展名的 sh 脚本，Windows 上不能运行，之前会被误选中）
+//  · 可执行文件只认 .exe / .cmd / .bat / .com（npm 还会生成一个无扩展名的 sh 脚本，Windows 上不能运行，之前会被误选中），并且不认图形界面程序（桌面版 Kimi.exe 不是命令行）
 //  · npm 的 .cmd 包装脚本不经 cmd.exe，直接运行它背后的 node 脚本或原生二进制（避免 cmd 的引号规则与孤儿进程）
 //  · 补上 npm / pnpm / bun / scoop / winget 等 Windows 常见的全局 bin 目录；跳过商店应用的执行别名目录（那里的 Claude.exe 是桌面版，不是命令行）
 import fs from "node:fs";
@@ -72,9 +72,26 @@ export function windowsBinDirs(name?: string): string[] {
     path.join(local, "codebuddy", "bin"),                        // CodeBuddy 原生安装
     path.join(HOME, "bin"),                                      // Factory droid
   ];
-  if (name) dirs.push(path.join(local, "Programs", name), path.join(local, "Programs", name, "bin"));   // 独立安装器常用 %LOCALAPPDATA%\Programs\<name>\
+  // 独立安装器常用 %LOCALAPPDATA%\Programs\<name>\bin\。只看 bin\ 子目录：%LOCALAPPDATA%\Programs\<name>\<name>.exe 多半是同名桌面应用（Kimi、CodeBuddy 都是 Electron 程序）
+  if (name) dirs.push(path.join(local, "Programs", name, "bin"));
   return dirs.filter(Boolean);
 }
+
+/** PE 可选头里的 Subsystem：2 = 图形界面（桌面应用），3 = 控制台；不是 PE 文件或读不出来返回 null */
+export function peSubsystem(file: string): number | null {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const h = Buffer.alloc(64);
+      if (fs.readSync(fd, h, 0, 64, 0) < 64 || h.toString("latin1", 0, 2) !== "MZ") return null;
+      const b = Buffer.alloc(94);
+      if (fs.readSync(fd, b, 0, 94, h.readUInt32LE(0x3c)) < 94 || b.toString("latin1", 0, 4) !== "PE\0\0") return null;
+      return b.readUInt16LE(4 + 20 + 68);   // 签名 4 + COFF 头 20，Subsystem 在可选头偏移 68（PE32 与 PE32+ 相同）
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+/** 图形界面程序不是命令行 agent（桌面版 Kimi.exe / Claude.exe 这类），找命令时要跳过 */
+const isGuiExe = (p: string) => /\.exe$/i.test(p) && peSubsystem(p) === 2;
 
 /** 在 PATH 与常见安装目录里找可执行文件。Windows 只认可直接执行的扩展名，.exe 优先于 .cmd */
 export function findBin(name: string): string | null {
@@ -91,7 +108,7 @@ export function findBin(name: string): string | null {
       const p = path.join(d, name + ext);
       try {
         fs.accessSync(p, WIN ? fs.constants.F_OK : fs.constants.X_OK);
-        if (fs.statSync(p).isFile()) return p;
+        if (fs.statSync(p).isFile() && !(WIN && isGuiExe(p))) return p;
       } catch {}
     }
   }
@@ -101,7 +118,13 @@ export function findBin(name: string): string | null {
 /** Windows 上的 .cmd / .bat 包装脚本不能直接 spawn（Node 18.20+ 会 EINVAL） */
 export const needsShell = (bin: string) => WIN && /\.(cmd|bat)$/i.test(bin);
 
-export interface Launcher { file: string; prefix: string[]; shell: boolean; env?: Record<string, string> }
+export interface Launcher {
+  file: string;                    // 真正要 spawn 的程序
+  prefix: string[];                // 放在用户参数前面的参数（node 脚本路径）
+  shell: boolean;                  // 退回 cmd.exe
+  env?: Record<string, string>;    // 额外环境变量
+  pathPrepend?: string[];          // 要加到 PATH 最前面的目录（npm 包随附的 rg 等）
+}
 
 /** 解析 npm / pnpm / yarn 生成的 .cmd 包装脚本，找出它真正运行的目标："%dp0%\node_modules\<pkg>\bin\x.js"（node 脚本，也可能没有扩展名）或原生 .exe */
 export function parseNpmShim(cmdFile: string): string | null {
@@ -135,10 +158,13 @@ function isPE(file: string): boolean {
   } catch { return false; }
 }
 
-/** 有些 npm 包只是原生二进制的壳（Codex）：直接找出该平台的二进制，省掉 node 这一层。
- *  @openai/codex 的 bin/codex.js 只做一件事：按平台 spawn 可选依赖 @openai/codex-win32-{x64,arm64} 里的 vendor/<triple>/bin/codex.exe
+type Native = { file: string; env?: Record<string, string>; pathPrepend?: string[] };
+
+/** 有些 npm 包只是原生二进制的壳（Codex）：直接找出该平台的二进制，省掉 node 这一层，并补上 codex.js 原本会设置的环境。
+ *  @openai/codex 的 bin/codex.js 只做一件事：按平台 spawn 可选依赖 @openai/codex-win32-{x64,arm64} 里的 vendor/<triple>/bin/codex.exe，
+ *  同时设置 CODEX_MANAGED_BY_NPM / CODEX_MANAGED_PACKAGE_ROOT，并把随附 rg 所在的 vendor/<triple>/path 加进 PATH
  *  （旧版本放在 vendor/<triple>/codex/codex.exe，更老的版本直接随主包携带 vendor/）。可选依赖可能嵌套在主包下，也可能被提升到上一层 */
-function vendoredNative(script: string): string | null {
+function vendoredNative(script: string): Native | null {
   const m = script.match(/^(.*[\\/]node_modules)[\\/]@openai[\\/]codex[\\/]bin[\\/]codex\.[cm]?js$/i);
   if (!m) return null;
   const nm = m[1], pkg = path.join(nm, "@openai", "codex");
@@ -149,9 +175,29 @@ function vendoredNative(script: string): string | null {
   for (const root of roots) {
     for (const rel of [["vendor", triple, "bin", "codex.exe"], ["vendor", triple, "codex", "codex.exe"]]) {
       const p = path.join(root, ...rel);
-      if (isPE(p)) return p;
+      if (!isPE(p)) continue;
+      const rgDir = path.join(root, "vendor", triple, "path");
+      return { file: p, env: { CODEX_MANAGED_BY_NPM: "1", CODEX_MANAGED_PACKAGE_ROOT: pkg }, pathPrepend: fs.existsSync(rgDir) ? [rgDir] : undefined };
     }
   }
+  return null;
+}
+
+/** @anthropic-ai/claude-code 的 bin/claude.exe 在 postinstall 之前只是个 sh 脚本占位（pnpm 默认不跑依赖的安装脚本）；
+ *  这时真正的二进制在平台包 @anthropic-ai/claude-code-win32-{x64,arm64} 里，主包还带了 cli-wrapper.cjs 作为 node 退路 */
+function claudeNativeFallback(target: string, cmdFile: string): Launcher | null {
+  const m = target.match(/^(.*[\\/]node_modules)[\\/]@anthropic-ai[\\/]claude-code[\\/]bin[\\/]claude\.exe$/i);
+  if (!m) return null;
+  const nm = m[1], pkg = path.join(nm, "@anthropic-ai", "claude-code");
+  const plat = process.arch === "arm64" ? "claude-code-win32-arm64" : "claude-code-win32-x64";
+  for (const root of [path.join(pkg, "node_modules", "@anthropic-ai", plat), path.join(nm, "@anthropic-ai", plat)]) {
+    for (const rel of [["claude.exe"], ["bin", "claude.exe"]]) {
+      const p = path.join(root, ...rel);
+      if (isPE(p)) return { file: p, prefix: [], shell: false };
+    }
+  }
+  const wrapper = path.join(pkg, "cli-wrapper.cjs");
+  if (fs.existsSync(wrapper)) { const n = nodeFor(cmdFile); return { file: n.file, prefix: [wrapper], shell: false, env: n.env }; }
   return null;
 }
 
@@ -165,19 +211,26 @@ function nodeFor(cmdFile: string): { file: string; env?: Record<string, string> 
 }
 
 const launcherCache = new Map<string, Launcher>();
+/** 重新扫描 agent 时清掉缓存（CLI 升级后包装脚本背后的目标可能变了） */
+export function resetLaunchers() { launcherCache.clear(); }
+const stillValid = (l: Launcher) => [l.file, ...l.prefix].every((p) => fs.existsSync(p));
+
 /** 决定怎么启动一个命令：直接运行 / node + 脚本 / 退回 cmd.exe */
 export function launcherFor(bin: string): Launcher {
-  const hit = launcherCache.get(bin); if (hit) return hit;
+  const hit = launcherCache.get(bin);
+  if (hit && stillValid(hit)) return hit;
   let l: Launcher = { file: bin, prefix: [], shell: false };
   if (needsShell(bin)) {
     // yarn global 的 bin\x.cmd 只是再调一层 Data\global\node_modules\.bin\x.cmd：顺着链找真正的目标（最多 3 层）；链解析不了就退回 cmd.exe，它能原样运行嵌套的 .cmd
     let target = parseNpmShim(bin);
     for (let i = 0; target && /\.(cmd|bat)$/i.test(target); i++) target = i < 3 ? parseNpmShim(target) : null;
     const viaCmd: Launcher = { file: bin, prefix: [], shell: true };
-    if (target && isNativeTarget(target)) l = isPE(target) ? { file: target, prefix: [], shell: false } : viaCmd;   // npm 的 postinstall 没跑时 .exe 只是占位脚本：交给 cmd.exe，让它自己的报错显示出来
-    else if (target && isNodeScript(target)) {
+    if (target && isNativeTarget(target)) {
+      // .exe 占位脚本（postinstall 没跑）：先找平台包里的真二进制；都没有就交给 cmd.exe，让它自己的报错显示出来
+      l = isPE(target) && !isGuiExe(target) ? { file: target, prefix: [], shell: false } : claudeNativeFallback(target, bin) ?? viaCmd;
+    } else if (target && isNodeScript(target)) {
       const native = vendoredNative(target);
-      if (native) l = { file: native, prefix: [], shell: false };
+      if (native) l = { file: native.file, prefix: [], shell: false, env: native.env, pathPrepend: native.pathPrepend };
       else { const n = nodeFor(bin); l = { file: n.file, prefix: [target], shell: false, env: n.env }; }
     } else l = viaCmd;
   }
@@ -198,9 +251,20 @@ export function stripNestedClaudeEnv(src: NodeJS.ProcessEnv = process.env): Node
   return env;
 }
 
+/** 按启动方式补环境变量：额外变量直接覆盖，pathPrepend 加到 PATH 前面（Windows 上键可能叫 Path，按不分大小写找） */
+export function envForLauncher(l: Launcher, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!l.env && !l.pathPrepend?.length) return base;
+  const env: NodeJS.ProcessEnv = { ...base, ...(l.env ?? {}) };
+  if (l.pathPrepend?.length) {
+    const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+    env[key] = [...l.pathPrepend, env[key] ?? ""].filter(Boolean).join(path.delimiter);
+  }
+  return env;
+}
+
 export function spawnCli(bin: string, args: string[], opts: { env: NodeJS.ProcessEnv; cwd: string }): ChildProcess {
   const l = launcherFor(bin);
-  const env = l.env ? { ...opts.env, ...l.env } : opts.env;
+  const env = envForLauncher(l, opts.env);
   const child = !l.shell
     ? spawn(l.file, [...l.prefix, ...args], { env, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true })
     : spawn(`"${l.file}"`, args.map(quoteForCmd), { env, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], shell: true, windowsHide: true });
