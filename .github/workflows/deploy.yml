@@ -37,6 +37,7 @@ jobs:
           rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
             --exclude node_modules --exclude .git --exclude release --exclude dist \
             --exclude data --exclude sessions --exclude downloads --exclude .env \
+            --exclude deploy/keys --exclude migration --exclude .DS_Store \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/srv/peergrading/"
       - name: Rebuild and restart
         env:

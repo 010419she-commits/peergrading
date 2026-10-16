@@ -7,3 +7,6 @@ docs
 .claude
 downloads
 release
+deploy/keys
+migration
+.DS_Store

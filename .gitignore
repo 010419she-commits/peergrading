@@ -6,3 +6,5 @@ release/
 dist/
 downloads/
 deploy/keys/
+migration/
+.DS_Store

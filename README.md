@@ -27,6 +27,17 @@ npm run dev      # 本地开发：启用“开发者登录”，打开 http://lo
 npm start        # 正式运行：需要 .env（见 .env.example）
 ```
 
+## 换电脑继续开发
+
+`peergrading` 是完整工程目录，可直接复制到新电脑，务必包含隐藏的 `.git` 目录。`node_modules/` 与 `release/` 中的解压缓存可以重新生成，不必搬运。
+
+1. 关闭本地 PeerGrading 和开发服务，在旧电脑执行 `bash scripts/backup-project.sh`，得到 `migration/backups/peergrading-日期时间.tar.gz`。该私人归档包含源码、Git 历史、本地数据 / 会话、安装包，以及存在时的 `.env`、`deploy/keys/` 和 `migration/` 资料；不包含依赖、解压缓存与旧归档。
+2. 通过可信的私人渠道复制归档到新电脑并解压，或直接复制整个工程文件夹。安装 Node.js ≥ 24、Git 后，在工程内运行 `npm ci`，再运行 `npm test`、`npm run dev`。桌面开发运行 `npm run desktop`；新电脑上的 Claude Code、Codex、GitHub 等需要各自安装和重新授权，无需复制全局登录文件。
+3. `migration/forms/` 保存网站申请表等本地资料；若已备份生产配置、数据库或 SSH 凭证，也只保存在 `migration/` 或 `deploy/keys/`。这些目录与 `.env`、`data/`、`sessions/`、`downloads/`、`release/` 均不进 GitHub。**归档可能包含密钥、支付配置和用户数据，不能上传 GitHub 或公开分享；GitHub clone 也不会恢复这些本地内容。**
+4. 桌面软件自身的数据另存于系统应用数据目录（macOS 通常为 `~/Library/Application Support/peergrading/`），不在源码文件夹内。本次换机已将旧电脑的 `data/` 私人备份到 `migration/private/desktop/`（SQLite 使用一致快照；当时没有 `sessions/` 目录）。以后如需保留软件里的新会话，退出软件后另行备份其 `data/`、`sessions/`。新电脑启动软件后重新配对、重新登录 Agent；私人备份用于留存历史，不必恢复旧的设备令牌。已有仓库协作记录引用原电脑的绝对路径，迁移后须重新选择仓库路径，不能直接续跑旧 worktree。
+
+服务器继续独立运行，换电脑无需重装服务器。后续发布使用 GitHub Actions；需要手动管理服务器时，私下迁移 SSH 凭证并保留原权限。生产 `.env` 应在服务器或私人备份中保留，参考 `.env.example`，不要把真实配置提交到仓库。
+
 ## 站点结构
 
 | 路径 | 说明 |
