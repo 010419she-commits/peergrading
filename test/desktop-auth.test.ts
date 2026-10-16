@@ -8,7 +8,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "pg-desktop-auth-"));
-Object.assign(process.env, { DATA_DIR: temporary, BASE_URL: "http://localhost:3000", LOCAL_MODE: "1", DEV_LOGIN: "1", NODE_ENV: "test", SESSION_SECRET: "isolated-desktop-auth-test-secret-000000000" });
+Object.assign(process.env, { DATA_DIR: temporary, BASE_URL: "http://localhost:3000", LOCAL_MODE: "1", DEV_LOGIN: "1", NODE_ENV: "test", SESSION_SECRET: "isolated-desktop-auth-test-secret-000000000", EMAIL_PROVIDER: "", EMAIL_FROM: "", EMAIL_TEST_OUTBOX_DIR: "" });
 const { db, q } = await import("../auth/db.ts");
 const { config } = await import("../auth/config.ts");
 const { attachBrowser } = await import("../auth/browser.ts");
@@ -163,7 +163,8 @@ test("one-click browser approval automatically signs the desktop in, without a t
     const bootstrap = await desktop.bootstrap();
     assert.equal(bootstrap.status, "authenticated"); assert.equal(bootstrap.user.id, cachedUser().id);
     const file = path.join(temporary, "device.json");
-    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    // Windows uses the user directory's ACL; POSIX mode bits apply only on Unix.
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.ok(JSON.parse(fs.readFileSync(file, "utf8")).token);
   } finally { process.off("peergrading:auth-complete" as any, onComplete); }
 });
@@ -265,6 +266,129 @@ test("logout discards in-flight usage permission and account data for the previo
       }
     } finally { release(); globalThis.fetch = realFetch; }
   }
+});
+test("desktop email endpoints require browser CSRF and never contact the mail service after rejection", async () => {
+  unpair();
+  const desktop = new Browser(localOrigin); await desktop.bootstrap();
+  let mailRequests = 0;
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    if (String(input).includes("/api/device/email/")) mailRequests++;
+    return realFetch(input, init);
+  };
+  try {
+    for (const endpoint of ["start", "verify"]) {
+      const route = `/api/local/auth/email/${endpoint}`;
+      assert.equal((await realFetch(localOrigin + route, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 403);
+      assert.equal((await desktop.post(route, {}, { "x-csrf-token": "forged" })).status, 403);
+      assert.equal((await desktop.post(route, {}, { origin: "https://evil.example" })).status, 403);
+    }
+    assert.equal(mailRequests, 0);
+  } finally { globalThis.fetch = realFetch; }
+});
+test("desktop email errors preserve cloud status without a false approval or a leaked device secret", async () => {
+  unpair();
+  const desktop = new Browser(localOrigin);
+  const sent = await desktop.post("/api/local/auth/email/start", { email: "unconfigured@example.test" });
+  assert.equal(sent.status, 503); assert.deepEqual(await sent.json(), { error: "mail_unavailable" });
+  assert.equal(isPaired(), false);
+  const response = await desktop.post("/api/local/auth/email/verify", { challengeId: "Z".repeat(22), code: "123456" });
+  assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: "code_unusable" });
+  for (const route of ["/api/local/auth/status", "/api/auth/bootstrap"]) {
+    const body = await (await desktop.request(route)).json();
+    assert.equal(body.deviceCode, undefined); assert.equal(body.deviceToken, undefined);
+    assert.equal(body.token, undefined); assert.equal(body.pairing?.deviceCode, undefined);
+  }
+});
+test("desktop email OTP completes the ordinary device flow and keeps both device secrets in the backend", async () => {
+  unpair();
+  const outbox = path.join(temporary, "email-outbox"); config.email.testOutboxDir = outbox;
+  const desktop = new Browser(localOrigin), email = "desktop-email@example.test";
+  try {
+    const sent = await desktop.post("/api/local/auth/email/start", { email });
+    assert.equal(sent.status, 200); const challenge = await sent.json();
+    assert.equal(challenge.deviceCode, undefined); assert.equal(challenge.deviceToken, undefined); assert.equal(challenge.code, undefined);
+    const file = path.join(outbox, `${challenge.challengeId}.json`);
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    const code = /验证码：(\d{6})/.exec(JSON.parse(fs.readFileSync(file, "utf8")).text)![1];
+    const verified = await desktop.post("/api/local/auth/email/verify", { challengeId: challenge.challengeId, code });
+    assert.equal(verified.status, 200); assert.deepEqual(await verified.json(), { ok: true, status: "approved", paired: true });
+    assert.equal(isPaired(), true); assert.equal((await desktop.bootstrap()).user.name, email);
+    const saved = JSON.parse(fs.readFileSync(path.join(temporary, "device.json"), "utf8"));
+    assert.match(saved.token, /^[A-Za-z0-9_-]{43}$/);
+    if (process.platform !== "win32") assert.equal(fs.statSync(path.join(temporary, "device.json")).mode & 0o777, 0o600);
+    const status = await (await desktop.request("/api/local/auth/status")).text();
+    assert.doesNotMatch(status, new RegExp(saved.token)); assert.doesNotMatch(status, /deviceCode|deviceToken/);
+    assert.equal((await desktop.post("/api/local/auth/email/start", { email })).status, 409);
+    await desktop.post("/api/local/auth/logout", {});
+  } finally { config.email.testOutboxDir = ""; unpair(); }
+});
+test("logging out during an email send discards its result and cannot resume the cancelled login", async () => {
+  unpair();
+  const desktop = new Browser(localOrigin);
+  let release!: () => void, contacted!: () => void;
+  const gate = new Promise<void>((resolve) => release = resolve), seen = new Promise<void>((resolve) => contacted = resolve);
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    if (String(input) === cloudOrigin + "/api/device/email/start") { contacted(); await gate; return Response.json({ challengeId: "X".repeat(22), expiresIn: 600, resendAfter: 60 }); }
+    return realFetch(input, init);
+  };
+  try {
+    const sent = desktop.post("/api/local/auth/email/start", { email: "cancel-send@example.test" });
+    await seen; await desktop.post("/api/local/auth/logout", {}); release();
+    const response = await sent; assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: "account_changed" });
+    assert.equal(isPaired(), false); assert.equal(await pollPairing(true), "none");
+  } finally { release(); globalThis.fetch = realFetch; }
+});
+test("logging out during OTP verification discards the late response without polling or restoring the device", async () => {
+  unpair();
+  const desktop = new Browser(localOrigin); await desktop.post("/api/local/pair/start", {});
+  let release!: () => void, contacted!: () => void, polls = 0;
+  const gate = new Promise<void>((resolve) => release = resolve), seen = new Promise<void>((resolve) => contacted = resolve);
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    if (String(input) === cloudOrigin + "/api/device/email/verify") { contacted(); await gate; return Response.json({ ok: true, status: "approved" }); }
+    if (String(input) === cloudOrigin + "/api/device/poll") polls++;
+    return realFetch(input, init);
+  };
+  try {
+    const verified = desktop.post("/api/local/auth/email/verify", { challengeId: "X".repeat(22), code: "123456" });
+    await seen; await desktop.post("/api/local/auth/logout", {}); release();
+    const response = await verified; assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: "account_changed" });
+    assert.equal(isPaired(), false); assert.equal(polls, 0);
+  } finally { release(); globalThis.fetch = realFetch; }
+});
+test("logging out while OTP verification polls its device invalidates the whole in-flight operation", async () => {
+  unpair();
+  const desktop = new Browser(localOrigin); await desktop.post("/api/local/pair/start", {});
+  let release!: () => void, contacted!: () => void;
+  const gate = new Promise<void>((resolve) => release = resolve), seen = new Promise<void>((resolve) => contacted = resolve);
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    if (String(input) === cloudOrigin + "/api/device/email/verify") return Response.json({ ok: true, status: "approved" });
+    if (String(input) === cloudOrigin + "/api/device/poll") { contacted(); await gate; return Response.json({ status: "pending" }); }
+    return realFetch(input, init);
+  };
+  try {
+    const verified = desktop.post("/api/local/auth/email/verify", { challengeId: "X".repeat(22), code: "123456" });
+    await seen; await desktop.post("/api/local/auth/logout", {}); release();
+    const response = await verified; assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: "account_changed" });
+    assert.equal(isPaired(), false); assert.equal(fs.existsSync(path.join(temporary, "device.json")), false);
+  } finally { release(); globalThis.fetch = realFetch; }
+});
+test("local provider discovery copies only public capability fields and never the cloud browser identity or CSRF", async () => {
+  unpair(); const previous = cloudOrigin;
+  setCloudUrl("https://provider-cache.example.test");
+  globalThis.fetch = async (input: any, init?: RequestInit) => {
+    if (String(input) === "https://provider-cache.example.test/api/auth/bootstrap") return Response.json({
+      csrf: "must-not-leak-cloud-csrf", user: { id: 999, name: "must-not-leak-cloud-user" },
+      providers: { google: { available: true, accessToken: "must-not-leak-token" }, email: { available: true, hint: "a".repeat(300), code: "must-not-leak-code" }, github: { available: true, clientSecret: "must-not-leak-client-secret" } },
+      plan: { name: "public-plan" },
+    });
+    return realFetch(input, init);
+  };
+  try {
+    const body = await new Browser(localOrigin).bootstrap();
+    assert.equal(body.user, null); assert.equal(body.providers.email.hint.length, 240);
+    for (const name of ["email", "github", "google"]) assert.equal(body.providers[name].available, true);
+    assert.doesNotMatch(JSON.stringify(body), /must-not-leak/);
+  } finally { globalThis.fetch = realFetch; setCloudUrl(previous); }
 });
 test("device creation rate limiting responds with Retry-After", async () => {
   let limited: Response | null = null;

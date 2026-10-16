@@ -122,7 +122,7 @@ $("#refresh").onclick = () => loadAgents(true);
 
 function renderCards() {
   const box = $("#cards");
-  const shown = agents.filter((a) => !isRepositoryMode() || ["claude-code", "codex"].includes(a.runner?.type));
+  const shown = agents.filter((a) => !isRepositoryMode() || ["claude-code", "codex", "kimi-code"].includes(a.runner?.type));
   if (!shown.length) { box.innerHTML = `<p class="sys">${esc(t(isRepositoryMode() ? "repoAgentsRequired" : "none"))}</p>`; return; }
   box.innerHTML = "";
   let lastGroup = null;
@@ -193,8 +193,8 @@ function updateRepositoryMode() {
   $("#media-images").closest(".media-opts").hidden = isRepositoryMode();
   document.querySelector('[data-i18n="mediaTitle"]').hidden = isRepositoryMode();
   if (isRepositoryMode()) {
-    const ready = agents.filter((a) => ["claude-code", "codex"].includes(a.runner?.type) && ["ready", "unverified"].includes(a.status));
-    for (const k of ["A", "B"]) if (!chosen[k] || !["claude-code", "codex"].includes(chosen[k].runner?.type)) chosen[k] = ready.find((a) => a !== chosen.A) || ready[0] || null;
+    const ready = agents.filter((a) => ["claude-code", "codex", "kimi-code"].includes(a.runner?.type) && ["ready", "unverified"].includes(a.status));
+    for (const k of ["A", "B"]) if (!chosen[k] || !["claude-code", "codex", "kimi-code"].includes(chosen[k].runner?.type)) chosen[k] = ready.find((a) => a !== chosen.A) || ready[0] || null;
     renderSlot("A"); renderSlot("B");
   }
   renderCards();
@@ -499,7 +499,7 @@ async function start() {
   if (!chosen.A || !chosen.B) { $("#status").textContent = t("needAgents"); return; }
   const slot = (k) => ({ agentId: chosen[k].id, name: $("#name-" + k).value, persona: $("#persona-" + k).value, effort: $("#effort-" + k).value });
   if (isRepositoryMode() && !$("#repository-path").value.trim()) { $("#status").textContent = t("repoNeedPath"); return; }
-  if (isRepositoryMode() && ![chosen.A, chosen.B].every((a) => ["claude-code", "codex"].includes(a.runner?.type))) { $("#status").textContent = t("repoAgentsRequired"); return; }
+  if (isRepositoryMode() && ![chosen.A, chosen.B].every((a) => ["claude-code", "codex", "kimi-code"].includes(a.runner?.type))) { $("#status").textContent = t("repoAgentsRequired"); return; }
   const body = { mode: $("#work-mode").value, repository: isRepositoryMode() ? { path: $("#repository-path").value.trim(), testCommands: $("#repository-tests").value } : undefined, task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
     media: { images: !isRepositoryMode() && $("#media-images").checked, videos: !isRepositoryMode() && $("#media-videos").checked } };
   resetView(); repositoryRun = body.mode === "repository"; setRunning(true);

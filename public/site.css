@@ -389,3 +389,5 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
   .download-site .header-inner { gap: 8px; }
   .demo-live { display: none; }
 }
+
+.email-login-form{display:grid;gap:10px;margin:18px 0}.email-login-form label{font-size:12px;color:var(--muted)}.email-send-row{display:flex;gap:8px}.email-send-row input{flex:1;min-width:0}.email-send-row .button{flex-shrink:0;padding-left:12px;padding-right:12px}.email-login-form .fine{margin:0;line-height:1.7;overflow-wrap:anywhere}.email-verification{display:grid;gap:10px}.email-verification[hidden]{display:none}.email-verification input{font:22px/1.4 ui-monospace,monospace;letter-spacing:.2em}.email-verification .ops{display:flex;gap:14px;flex-wrap:wrap}@media(max-width:420px){.email-send-row{flex-wrap:wrap}.email-send-row .button{width:100%}}

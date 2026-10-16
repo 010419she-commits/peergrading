@@ -10,3 +10,6 @@ release
 deploy/keys
 migration
 .DS_Store
+/__MACOSX/
+/peergrading/
+/换电脑先读.txt
