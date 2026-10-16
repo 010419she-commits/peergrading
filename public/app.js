@@ -26,7 +26,7 @@ function renderAccess() {
   const b = $("#access-badge"); if (!b || !me) return;
   const a = me.access;
   b.className = "access" + (a.member ? " member" : "");
-  b.textContent = a.member ? t("memberBadge") : t("trialBadge")(a.trial.daysLeft, a.trial.usesLeft);
+  b.textContent = a.member ? t("memberBadge") : a.beta ? t("betaBadge") : t("trialBadge")(a.trial.daysLeft, a.trial.usesLeft);
 }
 function showPaywall(access) {
   const p = $("#paywall"); if (!p) return;

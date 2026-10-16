@@ -61,6 +61,14 @@ export const config = {
     instructions: process.env.PAY_INSTRUCTIONS || "",
     qrUrl: process.env.PAY_QR_URL || "",
   },
+  /** 早鸟终身版：前 N 名一次买断（后台可改） */
+  earlyBird: { limit: Number(process.env.EARLY_BIRD_LIMIT || 200), priceCents: Number(process.env.EARLY_BIRD_PRICE_CENTS || 9900) },
+  /** 邀请奖励：双方各得 N 天会员；每人最多因邀请获奖 maxPerUser 次；被邀请者须在注册 claimDays 天内填码 */
+  referral: { days: Number(process.env.REFERRAL_DAYS || 7), maxPerUser: Number(process.env.REFERRAL_MAX || 20), claimDays: Number(process.env.REFERRAL_CLAIM_DAYS || 7) },
+  /** 站主后台 /admin：ADMIN_USER_IDS=1,2 或给用户授予 admin 权益（npm run grant -- <id> admin permanent） */
+  adminUserIds: (process.env.ADMIN_USER_IDS || "").split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0),
+  /** 后台上传的收款码 / 微信群二维码 */
+  uploadsDir: path.join(dataDir, "uploads"),
 };
 
 export const googleReady = () => !!(config.google.clientId && config.google.clientSecret);

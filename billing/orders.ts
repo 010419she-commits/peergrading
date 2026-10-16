@@ -4,17 +4,23 @@ import { q, transaction } from "../auth/db.ts";
 import { config } from "../auth/config.ts";
 import { grantEntitlement } from "../auth/entitlements.ts";
 import { now, randomToken, AuthError, timingEq } from "../auth/security.ts";
+import { getPlan, earlyBirdStats, EARLY_BIRD } from "./catalog.ts";
 
-export function createOrder(userId: number) {
-  const p = config.plan;
+/** 下单。限量方案（早鸟）名额用完抛 sold_out。建议在事务内调用，避免并发超卖 */
+export function createOrder(userId: number, planCode: string = config.plan.code) {
+  const p = getPlan(planCode);
+  if (!p) throw new AuthError("unknown_plan");
+  if (p.limit != null && earlyBirdStats().left <= 0) throw new AuthError("sold_out");
   const no = `DA${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${randomToken(6).replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase()}`;
-  const snapshot = JSON.stringify({ code: p.code, version: p.version, name: p.name, mode: p.mode, days: p.days, entitlement: p.entitlement });
+  const snapshot = JSON.stringify({ code: p.code, version: p.version, name: p.name, mode: p.mode, days: p.days, entitlement: p.entitlement, limit: p.limit });
   q(`INSERT INTO orders (user_id, merchant_id, merchant_order_no, plan_code, plan_version, plan_snapshot, amount_cents, currency)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, config.payment.merchantId, no, p.code, p.version, snapshot, p.priceCents, p.currency);
   return getOrder(no);
 }
 export const getOrder = (no: string) => q("SELECT * FROM orders WHERE merchant_id = ? AND merchant_order_no = ?").get(config.payment.merchantId, no) || null;
-export const listOrders = (userId: number) => q("SELECT merchant_order_no, amount_cents, currency, status, created_at, paid_at, provider FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 20").all(userId);
+/** 关闭一笔待支付订单（占用时限已过：重新下单以重查名额与现价） */
+export const closeOrder = (no: string) => q("UPDATE orders SET status = 'closed' WHERE merchant_id = ? AND merchant_order_no = ? AND status = 'pending'").run(config.payment.merchantId, no);
+export const listOrders = (userId: number) => q("SELECT merchant_order_no, plan_code, amount_cents, currency, status, created_at, paid_at, provider FROM orders WHERE user_id = ? AND merchant_id = ? ORDER BY id DESC LIMIT 20").all(userId, config.payment.merchantId);
 
 export interface PaymentNotice {
   provider: string; eventId: string; merchantId?: string; merchantOrderNo: string;
@@ -44,8 +50,13 @@ export function processPayment(n: PaymentNotice): "processed" | "duplicate" {
       return "duplicate";
     }
     if (order.status !== "pending") throw new AuthError("order_not_pending");
-    q("UPDATE orders SET status = 'paid', provider = ?, provider_txn_id = ?, paid_at = ? WHERE id = ?").run(n.provider, n.providerTxnId, now(), order.id);
     const plan = JSON.parse(order.plan_snapshot);
+    // 限量方案：发放前再查一次名额（待支付订单只占用 24 小时，之后名额可能已被别人买走）。名额已满则不发放、订单保持待支付，由站主退款或手动赠送
+    if (order.plan_code === EARLY_BIRD && plan.limit != null) {
+      const eb = earlyBirdStats();
+      if (eb.sold >= eb.limit) throw new AuthError("sold_out");
+    }
+    q("UPDATE orders SET status = 'paid', provider = ?, provider_txn_id = ?, paid_at = ? WHERE id = ?").run(n.provider, n.providerTxnId, now(), order.id);
     grantEntitlement({ userId: order.user_id, entitlement: plan.entitlement, sourceType: "order", sourceRef: order.merchant_order_no,
       mode: plan.mode === "days" ? "days" : "permanent", days: plan.mode === "days" ? plan.days : null });
     q("UPDATE payment_events SET processed_at = ? WHERE id = ?").run(now(), evId);

@@ -7,6 +7,7 @@ import { requireAuthApi, requireBrowser } from "./middleware.ts";
 import { getUser } from "./users.ts";
 import { entitlementSummary } from "./entitlements.ts";
 import { accessStatus, recordUsage } from "../billing/access.ts";
+import { publicPlan } from "../billing/plan.ts";
 
 export const device = Router();
 const CODE_TTL = 10 * 60;
@@ -77,7 +78,7 @@ function userView(u: any) {
   return { id: u.id, name: u.display_name, avatar: u.avatar_url, createdAt: u.created_at, access: accessStatus(u), entitlements: entitlementSummary(u.id) };
 }
 /** 软件启动 / 定期核对：用户与使用权 */
-device.get("/api/device/me", requireDevice, (req, res) => res.json({ user: userView((req as any).user), plan: { trialDays: config.plan.trialDays, trialUses: config.plan.trialUses, priceCents: config.plan.priceCents, currency: config.plan.currency } }));
+device.get("/api/device/me", requireDevice, (req, res) => res.json({ user: userView((req as any).user), plan: publicPlan() }));
 /** 软件开始一次协作前：记一次试用用量并返回最新使用权；无使用权则 403 */
 device.post("/api/device/usage", requireDevice, (req, res) => {
   const u = (req as any).user;

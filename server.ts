@@ -12,9 +12,11 @@ import { requireCsrf } from "./auth/security.ts";
 import { auth, account } from "./auth/routes.ts";
 import { cleanupTx } from "./auth/tx.ts";
 import { billing, paymentWebhook } from "./billing/routes.ts";
+import { admin, isAdmin } from "./billing/admin.ts";
 import { device, cleanupDeviceCodes } from "./auth/device.ts";
 import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
+import { betaFree } from "./billing/settings.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor, windowsProcessNames } from "./agents/detect.ts";
 import { submitRelayReply, ignoreRelayText, sendToApp, listRunningApps, markOwnClipboardText, runInTerminal } from "./agents/relay.ts";
@@ -51,11 +53,27 @@ if (localMode) {
   app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${getCloudUrl()}/account`));
 } else {
   app.use(attachUser);
-  app.use(["/api", "/auth", "/login", "/app", "/account", "/device"], noStore);
+  app.use(["/api", "/auth", "/login", "/app", "/account", "/device", "/admin"], noStore);
+  // 邀请链接 /?ref=码：先记在 Cookie 里，首次登录建号时登记邀请
+  app.use((req, res, next) => {
+    const ref = req.query.ref;
+    if (req.method === "GET" && typeof ref === "string" && /^[A-Za-z0-9]{6,16}$/.test(ref)) res.cookie("pg_ref", ref.toUpperCase(), { maxAge: 30 * 86400 * 1000, httpOnly: true, sameSite: "lax", secure: config.isProd, path: "/" });
+    next();
+  });
   app.use(auth);
   app.use("/api/account", account);
   app.use(billing);
   app.use(device);
+  /* ---------- 站主后台 ---------- */
+  app.use(admin);
+  app.get("/admin", (req, res) => {
+    const u = (req as any).user;
+    if (!u) return res.redirect("/login?return_to=%2Fadmin&reason=required");
+    if (!isAdmin(u)) return res.status(404).type("text").send("Not found");
+    res.sendFile(path.join(here, "views", "admin.html"));
+  });
+  // 后台上传的收款码 / 微信群二维码：只给已登录用户看（账号页、订单页、后台）
+  app.use("/uploads", (req, res, next) => ((req as any).user ? next() : res.status(401).type("text").send("Unauthorized")), express.static(config.uploadsDir, { index: false, dotfiles: "deny", maxAge: "1h" }));
   /* ---------- 软件下载 ---------- */
   const DOWNLOADS = process.env.DOWNLOADS_DIR || path.join(here, "downloads");
   app.use("/download", express.static(DOWNLOADS, { index: false, dotfiles: "deny" }));
@@ -259,6 +277,6 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
 app.listen(config.port, HOST, () => {
   console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${getCloudUrl()}, paired=${isPaired()})`
-    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
+    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, beta=${betaFree()}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

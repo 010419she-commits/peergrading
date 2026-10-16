@@ -12,7 +12,7 @@ import { listIdentities, getIdentity, removeIdentities } from "./users.ts";
 import { entitlementSummary } from "./entitlements.ts";
 import { invalidateUserTx } from "./tx.ts";
 import { accessStatus } from "../billing/access.ts";
-import { publicPlan } from "../billing/plan.ts";
+import { publicPlan, wechatGroupInfo } from "../billing/plan.ts";
 
 export const auth = Router();
 export const account = Router();
@@ -27,7 +27,7 @@ export function meJson(req: Request) {
   return { user: {
     id: r.user.id, name: r.user.display_name, avatar: r.user.avatar_url, createdAt: r.user.created_at,
     identities: listIdentities(r.user.id), entitlements: entitlementSummary(r.user.id),
-    access: accessStatus(r.user),
+    access: accessStatus(r.user), wechatGroup: wechatGroupInfo(),
     recentlyVerified: recentlyVerified(r.session), verifiedBy: r.session.verified_by_identity_id,
   } };
 }
