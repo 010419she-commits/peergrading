@@ -66,7 +66,7 @@ async function fixWindowsPath() {
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); s.on("error", reject); });
 const waitFor = (url, ms = 15000) => new Promise((resolve, reject) => { const t0 = Date.now(); (function tick() { fetch(url).then((r) => (r.ok ? resolve() : retry())).catch(retry); function retry() { Date.now() - t0 > ms ? reject(new Error("服务未启动")) : setTimeout(tick, 200); } })(); });
 
-let win;
+let win, accountWin;
 async function start() {
   await fixPath();
   const userData = app.getPath("userData");
@@ -92,10 +92,53 @@ async function start() {
     const result = await dialog.showOpenDialog(win, { title: "选择现有 Git 仓库 / Select a Git repository", properties: ["openDirectory"] });
     return result.canceled ? null : result.filePaths[0] || null;
   });
-  const openExternal = (url) => { try { if (["https:", "http:"].includes(new URL(url).protocol)) shell.openExternal(url); } catch {} };
-  // 页面里 target=_blank 的链接（登录 / 账号 / 购买）用系统浏览器打开
-  win.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: "deny" }; });
-  win.webContents.on("will-navigate", (e, url) => { if (new URL(url).origin !== base) { e.preventDefault(); openExternal(url); } });
+  const openExternal = async (url) => {
+    const target = new URL(url);
+    if (target.protocol !== "https:" && !(target.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(target.hostname))) throw new Error("Unsupported URL");
+    if (target.username || target.password) throw new Error("Unsupported URL");
+    await shell.openExternal(target.href);
+  };
+  const guardWindow = (window) => {
+    window.webContents.setWindowOpenHandler(({ url }) => { openExternal(url).catch(() => {}); return { action: "deny" }; });
+    window.webContents.on("will-navigate", (event, url) => {
+      try { if (new URL(url).origin === base) return; } catch {}
+      event.preventDefault(); openExternal(url).catch(() => {});
+    });
+  };
+  const trusted = (event) => {
+    const owner = [win, accountWin].find((window) => window && !window.isDestroyed() && event.sender === window.webContents);
+    if (!owner || event.senderFrame !== owner.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw new Error("Invalid window");
+  };
+  guardWindow(win);
+  win.on("closed", () => { win = null; });
+  for (const channel of ["peergrading:open-account", "peergrading:enter-workspace", "peergrading:open-external"]) ipcMain.removeHandler(channel);
+  ipcMain.handle("peergrading:open-external", async (event, url) => { trusted(event); await openExternal(String(url)); });
+  ipcMain.handle("peergrading:open-account", async (event, section) => {
+    trusted(event);
+    const hash = ["#pricing", "#referral", "#security"].includes(section) ? section : "";
+    if (accountWin && !accountWin.isDestroyed()) { accountWin.show(); accountWin.focus(); return; }
+    accountWin = new BrowserWindow({
+      parent: win, width: 1120, height: 830, minWidth: 820, minHeight: 640, title: "账号与会员 · PeerGrading", backgroundColor: "#11100f",
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.cjs") },
+    });
+    guardWindow(accountWin);
+    accountWin.on("closed", () => { accountWin = null; });
+    await accountWin.loadURL(`${base}/account${hash}`);
+  });
+  ipcMain.handle("peergrading:enter-workspace", async (event) => {
+    trusted(event);
+    if (new URL(win.webContents.getURL()).pathname !== "/app") await win.loadURL(`${base}/app`);
+    accountWin?.close(); win.show(); win.focus();
+  });
+  process.on("peergrading:auth-complete", () => {
+    if (!win || win.isDestroyed()) return;
+    if (new URL(win.webContents.getURL()).pathname !== "/app") win.loadURL(`${base}/app`).catch(console.error);
+    accountWin?.close(); win.show(); win.focus();
+  });
+  process.on("peergrading:auth-logout", () => {
+    accountWin?.close();
+    if (win && !win.isDestroyed()) win.loadURL(`${base}/account`).catch(console.error);
+  });
   await win.loadURL(`${base}/`);
 }
 

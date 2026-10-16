@@ -53,9 +53,15 @@
       const r = await postJson(path, { userCode: input.value.trim() });
       status.hidden = false; status.className = "notice " + (r.ok ? "ok" : "warn");
       status.textContent = r.ok ? (path.endsWith("approve") ? t("deviceApproved") : t("deviceDenied")) : (r.error === "unknown_code" ? t("deviceUnknown") : r.error === "code_unusable" ? t("deviceUnusable") : r.error === "csrf" ? t("stale") : t("opFailed"));
+      if (r.ok && r.redirectUrl) {
+        try {
+          const target = new URL(r.redirectUrl);
+          if (target.protocol === "http:" && target.hostname === "127.0.0.1" && Number(target.port) >= 1024 && target.pathname === "/api/local/auth/callback" && !target.username && !target.password && !target.hash) location.assign(target.href);
+        } catch {}
+      }
     };
-    $("#device-approve").onclick = () => post("/api/device/approve");
-    $("#device-deny").onclick = () => post("/api/device/deny");
+    $("#device-approve").onclick = busy($("#device-approve"), () => post("/api/device/approve"));
+    $("#device-deny").onclick = busy($("#device-deny"), () => post("/api/device/deny"));
   }
   function applyI18n() {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";

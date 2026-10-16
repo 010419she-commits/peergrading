@@ -255,3 +255,137 @@ dialog.modal::backdrop { background: rgba(8, 10, 14, .72); backdrop-filter: blur
 
 .checkout-box { margin: 20px 0; }
 .checkout-box img { display: block; max-width: 100%; border-radius: 8px; }
+
+/* Download website: a compact product header and an inspectable repository loop. */
+.download-site .header-inner { gap: 24px; }
+.download-site .brand { flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: 10px; }
+.download-site .brand img { flex: none; border-radius: 7px; }
+.download-site .brand-name { font-size: 22px; letter-spacing: .025em; white-space: nowrap; }
+.download-site .header-right { flex: 0 0 auto; gap: 18px; }
+.download-site .primary-nav { gap: 24px; }
+.download-site .hero { min-height: auto; padding-top: clamp(64px, 7vw, 100px); }
+.download-site .hero-layout { row-gap: 48px; }
+.download-site .hero h1 { font-size: clamp(36px, 4.6vw, 64px); line-height: 1.35; letter-spacing: -.015em; max-width: 12em; }
+.download-site .hero .lead { margin-top: 24px; max-width: 32em; }
+.download-site .hero-actions { gap: 18px 28px; margin-top: 32px; }
+.hero-platforms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 20px; color: var(--muted); font-size: 12px; letter-spacing: .035em; }
+.hero-platforms > span[aria-hidden] { color: var(--control-line); }
+.repo-demo { min-width: 0; width: 100%; align-self: center; overflow: hidden; border: 1px solid #49505a; border-radius: 8px; background: linear-gradient(145deg, #1a212d, #131922); box-shadow: 0 24px 80px #0004, 0 0 96px #d6ba8109; font-size: 13px; }
+.repo-demo-top { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.window-dots { display: flex; flex: none; gap: 5px; }
+.window-dots i { width: 6px; height: 6px; border-radius: 50%; background: #707b8a; }
+.window-dots i:first-child { background: #b18c71; }
+.demo-live { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+.demo-live i { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+.repo-demo-body { padding: 18px 22px 20px; }
+.demo-repository { display: flex; align-items: center; gap: 8px; padding-bottom: 18px; color: var(--ink); font-size: 12px; }
+.demo-repository svg { flex: none; width: 18px; height: 18px; color: var(--accent); }
+.demo-repository code { margin-left: auto; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.demo-agent { display: flex; align-items: center; gap: 10px; }
+.agent-letter { display: grid; flex: none; place-items: center; width: 30px; height: 30px; border: 1px solid #d6ba8170; border-radius: 5px; color: var(--accent); background: #d6ba810a; font-size: 12px; }
+.agent-letter.secondary { border-color: #90a6c866; color: #b0c3e3; background: #90a6c80a; }
+.demo-agent > div { min-width: 0; }
+.demo-agent strong { display: block; font-size: 12px; font-weight: 500; line-height: 1.5; }
+.demo-agent small { display: block; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.demo-role { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.demo-diff { overflow: hidden; margin: 14px 0 20px 40px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(9px, .83vw, 11px); line-height: 2; }
+.demo-diff > div { padding-inline: 12px; white-space: nowrap; }
+.diff-file { padding-block: 4px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.diff-removed { color: #d3a19a; background: #bb525b12; }
+.diff-added { color: #9cc3a3; background: #65ad7514; }
+.diff-context { color: #8f9bad; }
+.demo-review { margin: 10px 0 16px 40px; color: var(--muted); font-size: 12px; line-height: 1.9; }
+.demo-result { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 10px; }
+.demo-result i { margin-right: 8px; color: var(--accent); font-style: normal; }
+.demo-test { color: var(--ok); }
+.repo-demo-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.repo-demo-foot > span:last-child { flex: none; color: var(--accent); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.download-site .principles { margin-top: 48px; }
+.repository-method { background: var(--bg); }
+.method-note { max-width: 66em; margin-top: 28px; color: var(--muted); font-size: 13px; }
+.download-section { border-top: 1px solid var(--line); background: linear-gradient(180deg, #d6ba8104, transparent 55%); }
+.download-site .download-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.download-card { min-width: 0; padding: clamp(24px, 3vw, 40px); border-radius: 5px; }
+.download-card-heading { display: flex; align-items: center; gap: 14px; }
+.download-card-heading h3 { font-family: var(--serif); font-size: 30px; }
+.platform-symbol { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 9px; color: var(--accent); font-size: 29px; line-height: 1; }
+.download-card > .muted { min-height: 3.6em; font-size: 14px; }
+.installer-links { display: grid; gap: 20px; width: 100%; margin-top: 12px; }
+.installer { min-width: 0; }
+.installer .button { width: 100%; gap: 8px; font-size: 14px; }
+.download-card .installer-file { margin-top: 8px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.install-help { width: 100%; margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.install-help summary { width: fit-content; padding: 4px 0; color: var(--ink); cursor: pointer; }
+.install-help p { margin-top: 12px; }
+.install-help code { display: block; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); background: var(--bg); font-size: 11px; user-select: all; overflow-wrap: anywhere; }
+.download-start { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; margin-top: 32px; color: var(--muted); font-size: 13px; }
+.download-start > span[aria-hidden] { color: var(--accent); }
+.download-error { display: grid; gap: 16px; justify-items: start; grid-column: 1 / -1; }
+.download-site .contact-panel { align-items: start; border-radius: 5px; }
+.download-site .contact-panel .lead { margin-top: 24px; font-size: 16px; }
+.download-site .contact-panel .text-link { margin-top: 24px; }
+.app-account-notes { display: grid; gap: 26px; }
+.app-account-notes > div { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 6px 16px; }
+.account-note-index { grid-row: 1 / span 2; padding-top: 4px; color: var(--accent); font-size: 12px; }
+.app-account-notes h3 { font-size: 17px; }
+.app-account-notes p { grid-column: 2; color: var(--muted); font-size: 14px; }
+.footer-caption { margin-left: 20px; color: #8e99a9; }
+@media (min-width: 1000px) {
+  .download-site .hero-layout { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); column-gap: 56px; }
+  .download-site .hero-bottom { margin-top: 12px; }
+}
+@media (min-width: 1100px) {
+  .download-site .primary-nav { display: flex; width: auto; justify-content: flex-end; }
+  .download-site .header-inner { flex-wrap: nowrap; min-height: 84px; }
+  .download-site.menu-ready .menu-toggle, .menu-ready .download-site .menu-toggle { display: none; }
+}
+@media (max-width: 1099px) {
+  .download-site .header-inner { flex-wrap: wrap; min-height: 76px; gap: 12px 16px; padding-block: 12px; }
+  .download-site .header-right { width: auto; gap: 12px; }
+  .menu-ready .download-site .header-inner { flex-wrap: nowrap; }
+  .menu-ready .download-site .primary-nav { display: none; }
+  .menu-ready .download-site .menu-toggle { display: inline-flex; }
+}
+@media (max-width: 599px) {
+  .download-site .header-inner { min-height: 72px; }
+  .download-site .brand-name { font-size: 19px; letter-spacing: 0; }
+  .download-site .brand img { width: 27px; height: 27px; }
+  .download-site .brand { gap: 7px; }
+  .download-site .header-right { gap: 10px; }
+  .download-site .lang-seg button { padding: 7px 8px; font-size: 11px; }
+  .download-site .header-download { display: none; }
+  .download-site .menu-toggle { min-height: 36px; padding: 6px 9px; font-size: 12px; }
+  .download-site .hero { padding-top: 48px; }
+  .download-site .hero-layout { gap: 32px; }
+  .download-site .hero h1 { font-size: clamp(32px, 8.5vw, 44px); line-height: 1.4; }
+  .download-site .hero .eyebrow { gap: 8px; font-size: 10px; letter-spacing: .055em; margin-bottom: 18px; }
+  .download-site .hero .eyebrow::before { flex-basis: 18px; }
+  .download-site .hero-actions { gap: 18px 22px; }
+  .download-site .hero-actions .button { padding-inline: 18px; }
+  .download-site .hero-actions .text-link { font-size: 13px; }
+  .download-site .hero-bottom { gap: 12px; }
+  .download-site .hero-bottom > span { flex-basis: 100%; padding-top: 12px; font-size: 12px; }
+  .repo-demo-top { padding: 12px 14px; gap: 8px; }
+  .repo-demo-body { padding: 16px; }
+  .demo-repository { flex-wrap: wrap; }
+  .demo-repository code { max-width: 58%; font-size: 9px; }
+  .demo-diff { margin-left: 0; font-size: 10px; }
+  .demo-diff > div { padding-inline: 9px; }
+  .demo-review { margin-left: 0; }
+  .demo-result { gap: 6px; }
+  .repo-demo-foot { padding-inline: 14px; font-size: 9px; }
+  .download-site .download-cards { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .download-card > .muted { min-height: 0; }
+  .download-start { display: grid; justify-content: start; gap: 6px; }
+  .download-start > span[aria-hidden] { transform: rotate(90deg); width: fit-content; }
+  .download-site .contact-panel { padding: 24px; }
+  .footer-caption { display: block; margin-left: 0; margin-top: 4px; }
+}
+@media (max-width: 359px) {
+  .download-site .brand-name { font-size: 17px; }
+  .download-site .brand img { width: 24px; height: 24px; }
+  .download-site .header-right { gap: 7px; }
+  .download-site .lang-seg button { padding-inline: 6px; }
+  .download-site .header-inner { gap: 8px; }
+  .demo-live { display: none; }
+}

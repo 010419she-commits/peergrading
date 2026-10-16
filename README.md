@@ -1,10 +1,19 @@
 # PeerGrading · 双 Agent 协作循环
 
-Two AI coding agents take turns as author and reviewer, critiquing, debating and revising each other's work until it passes. Desktop app for macOS / Windows + companion site at https://peergrading.ai.
+Two AI coding agents take turns editing and reviewing your existing Git repository. The macOS / Windows app handles collaboration, sign-in and membership. Download it at https://peergrading.ai.
 
-两个 AI 智能体轮流担任**作者**与**审查者**：A 完成第 1 版 → B 审查并与 A 讨论 → B 修改出第 2 版 → A 审查…… 直到审查者判定「通过」。网页自动识别你电脑上的 agent（Claude Code、Codex、Qwen Code、Kimi Code 等），一键选两个开始。
+两个 AI 智能体轮流担任**作者**与**审查者**：A 修改第 1 版 → B 审查差异并与 A 讨论 → B 修改第 2 版 → A 审查。桌面软件自动识别本机 Agent；仓库模式使用 Claude Code / Codex CLI，直接修改现有 Git 工程。每轮留下提交、补丁与检查结果，由你审阅合并。
 
-本版按三份评审稿重建：功能与账号体系按《网站微信 / Google 登录接入、会费制基础与视觉改造 · v9》，视觉按《品牌网站 · 视觉方向 A 样稿（第 4 版）》（深色 · 暖白 · 浅金），成果验证按《第 4 版：在成果版本后增加收尾 Agent》。前两份原稿在 `docs/`。
+早期设计稿保存在 `docs/`；当前桌面账号流程见 [桌面登录与会员说明](docs/desktop-account.md)，以实现与这份说明为准。
+
+## 0.4：软件内登录与会员，官网专注下载
+
+- 官网首页展示双 Agent 修改现有仓库的能力与安装包，移除首页登录、会员购买与手填配对码的主流程。下载链接从服务端获取最新版本，不写死安装包版本。
+- 软件首次启动直接进入登录页；从工作台打开「账号与会员」，可查看会员、方案、订单、邀请奖励、关联身份及设备，在同一个本机窗口里操作。
+- Google / 微信授权按各自要求在系统浏览器完成，确认后自动连接并返回软件。8 位连接码改为备用方式，10 分钟有效且一次性使用；不会要求默认抄码。
+- 登录渠道与收款渠道由生产配置决定。微信和支付尚待账号申请、商户审核与凭证配置；内测默认免费，不能用本地模拟结果代替真实收款验收。
+
+使用、授权边界、配置与排查见 [桌面登录与会员说明](docs/desktop-account.md)。
 
 ## 0.3：直接协作修改已有仓库
 
@@ -34,7 +43,7 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 1. 关闭本地 PeerGrading 和开发服务，在旧电脑执行 `bash scripts/backup-project.sh`，得到 `migration/backups/peergrading-日期时间.tar.gz`。该私人归档包含源码、Git 历史、本地数据 / 会话、安装包，以及存在时的 `.env`、`deploy/keys/` 和 `migration/` 资料；不包含依赖、解压缓存与旧归档。
 2. 通过可信的私人渠道复制归档到新电脑并解压，或直接复制整个工程文件夹。安装 Node.js ≥ 24、Git 后，在工程内运行 `npm ci`，再运行 `npm test`、`npm run dev`。桌面开发运行 `npm run desktop`；新电脑上的 Claude Code、Codex、GitHub 等需要各自安装和重新授权，无需复制全局登录文件。
 3. `migration/forms/` 保存网站申请表等本地资料；若已备份生产配置、数据库或 SSH 凭证，也只保存在 `migration/` 或 `deploy/keys/`。这些目录与 `.env`、`data/`、`sessions/`、`downloads/`、`release/` 均不进 GitHub。**归档可能包含密钥、支付配置和用户数据，不能上传 GitHub 或公开分享；GitHub clone 也不会恢复这些本地内容。**
-4. 桌面软件自身的数据另存于系统应用数据目录（macOS 通常为 `~/Library/Application Support/peergrading/`），不在源码文件夹内。本次换机已将旧电脑的 `data/` 私人备份到 `migration/private/desktop/`（SQLite 使用一致快照；当时没有 `sessions/` 目录）。以后如需保留软件里的新会话，退出软件后另行备份其 `data/`、`sessions/`。新电脑启动软件后重新配对、重新登录 Agent；私人备份用于留存历史，不必恢复旧的设备令牌。已有仓库协作记录引用原电脑的绝对路径，迁移后须重新选择仓库路径，不能直接续跑旧 worktree。
+4. 桌面软件自身的数据另存于系统应用数据目录（macOS 通常为 `~/Library/Application Support/peergrading/`），不在源码文件夹内。本次换机已将旧电脑的 `data/` 私人备份到 `migration/private/desktop/`（SQLite 使用一致快照；当时没有 `sessions/` 目录）。以后如需保留软件里的新会话，退出软件后另行备份其 `data/`、`sessions/`。新电脑启动软件后重新登录 PeerGrading 与 Agent；私人备份用于留存历史，不必恢复旧的设备令牌。已有仓库协作记录引用原电脑的绝对路径，迁移后须重新选择仓库路径，不能直接续跑旧 worktree。
 
 服务器继续独立运行，换电脑无需重装服务器。后续发布使用 GitHub Actions；需要手动管理服务器时，私下迁移 SSH 凭证并保留原权限。生产 `.env` 应在服务器或私人备份中保留，参考 `.env.example`，不要把真实配置提交到仓库。
 
@@ -42,32 +51,37 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 
 | 路径 | 说明 |
 |---|---|
-| `/` | 首页：理念 / 接入方式 / 流程 / 定价，登录弹窗 |
-| `/app` | 工作台（必须登录，且在试用期内或已购买） |
-| `/account` | 账号：使用权与剩余天数、订阅方案、邀请码、内测微信群、订单、关联 / 解绑 / 重新验证登录方式 |
+| `/` | 公网下载官网：仓库协作介绍、流程、macOS / Windows 下载；首页不提供登录或购买入口 |
+| `/api/download/latest` | 返回当前可下载的安装包；官网动态展示版本、平台与文件大小 |
+| `/app` | 本机工作台：登录后按内测 / 试用 / 会员规则放行；公网工作台默认关闭并跳转下载 |
+| `/account` | 本机：软件内账号与会员窗口；公网：授权后的身份验证与旧版兼容账号页 |
+| `/device` | 系统浏览器授权确认页，连接码自动填写；支持旧版手动输入 |
+| `/desktop/checkout/:ticket` | 软件发起的信用卡托管付款启动页，使用短时一次性票据 |
 | `/admin` | 站主后台（仅管理员）：内测开关、收款设置、早鸟 / 邀请参数、微信群二维码、用户剩余天数、订单确认、赠送会员 |
 | `/login` | 无 JS 也可用的登录页 |
 | `/terms` `/privacy` | 占位页，正式发布前替换 |
 
-## 登录与账号（v9 规格）
+## 登录与账号
 
-- 微信登录（开放平台「网站应用」扫码；在微信内置浏览器里打开时改用公众号授权）与 Google 登录；首次登录自动建账号。
+- 软件内点「登录 / 注册」，在系统浏览器选择已配置的 Google / 微信渠道，第三方授权后确认连接；软件自动进入工作台。首次授权创建账号，无需手工抄录连接码。
+- 软件「账号与会员」集中展示会员状态、方案、订单、邀请奖励及设备。绑定 / 解绑、切换或重新验证第三方身份仍在系统浏览器中完成，设备令牌不代替浏览器的身份验证。
+- 微信登录支持开放平台「网站应用」扫码；在微信内置浏览器中可按配置使用公众号授权。渠道是否显示取决于服务端凭证与审核状态，发布软件不会自动开通渠道。
 - 浏览器认证版本 `auth_epoch`、一次性认证事务、服务端会话（HttpOnly Cookie）、与会话绑定的 CSRF 令牌、返回位置白名单。
 - 账号页支持切换账号、重新验证、绑定 / 解绑（解绑微信时整组移除），至少保留一种登录方式。
 - 本地开发可用 `DEV_LOGIN=1` 启用“开发者登录”，不需要任何第三方凭证即可走通全部流程；生产环境该入口不存在。
 
-Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-membership.md` §8。微信：在 [open.weixin.qq.com](https://open.weixin.qq.com) 注册开发者账号（需企业资质）→ 创建「网站应用」，授权回调域填 `peergrading.ai` → 审核通过后把 AppID / AppSecret 写进服务器 `.env`（`ssh root@服务器 /srv/peergrading/deploy/set-wechat.sh`，密钥不要经过聊天或代码仓库）。只要 `.env` 里没有微信凭证，登录页就不显示微信按钮。
+Google OAuth 须在服务器配置 `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`，回调地址为 `https://peergrading.ai/auth/google/callback`。微信申请资格、网站应用审核与配置见 [微信登录接入](docs/wechat-login-setup.md)；授权回调域填 `peergrading.ai`，通过后把 AppID / AppSecret 写入服务器 `.env`（也可用 `deploy/set-wechat.sh`）。Google / 微信未配置的渠道不显示；微信登录、微信收款和海外信用卡收款分别申请与配置，当前微信和支付仍待开通，不能因界面已完成而视为已获准使用。真实密钥不能进入聊天、GitHub 或桌面安装包。
 
 ## 内测免费 → 开放订阅
 
-- **内测免费默认开**：所有登录用户免费使用全部功能，网站不显示购买入口（方案卡片标「内测结束后开放」），下单接口返回 403 `beta_free`，桌面软件不弹付费提示。徽标显示「内测免费」。
+- **内测免费默认开**：所有登录用户免费使用全部功能，软件内方案卡片标「内测结束后开放」，下单接口返回 403 `beta_free`，不要求付款。官网下载无需登录；会员状态与订单在软件内管理。徽标显示「内测免费」。
 - **开放订阅**：管理员在 `/admin` 关掉「内测免费」即可（或 `.env` 设 `FREE_BETA=0` 作为没有后台设置时的默认值）。关闭那一刻起：按会员 / 试用规则放行，试用结束或会员到期即停止使用；**内测期间注册的用户从关闭时起重新计算试用**（内测期间的用量不计）；内测期间登记的邀请奖励立即发放。
 - **管理员**：`.env` 里 `ADMIN_USER_IDS=<用户 ID>`（账号页「用户 ID」一行可查），或 `npm run grant -- <用户ID> admin permanent`。非管理员访问 `/admin` 得到 404。
 
 ## 试用、方案与邀请
 
 - 试用：注册后 **3 天内可免费使用 5 次**协作（先到者为准）；`TRIAL_DAYS` / `TRIAL_USES` 可改。
-- **早鸟终身版**：前 **200 名** ¥99 一次买断、永久使用（`EARLY_BIRD_LIMIT` / `EARLY_BIRD_PRICE_CENTS`，后台可改）。名额 = 已付订单 + 24 小时内的待支付订单；售罄后下单返回 409 `sold_out`，网站显示「已售罄」。
+- **早鸟终身版**：前 **200 名** ¥99 一次买断、永久使用（`EARLY_BIRD_LIMIT` / `EARLY_BIRD_PRICE_CENTS`，后台可改）。名额 = 已付订单 + 24 小时内的待支付订单；售罄后下单返回 409 `sold_out`，软件显示「已售罄」。
 - **月付**：默认 **每月 18 元**（`PLAN_MODE=days`、`PLAN_DAYS=30`、`PRICE_CENTS=1800`）：每次付款延长 30 天，会员期内可提前续费（顺延累加），到期不自动扣费。改 `CURRENCY=USD` 即按美元计价；`PLAN_MODE=permanent` 改为一次买断。自动扣费的订阅需要接 Stripe 等渠道的 subscription，当前未接。
 - **邀请奖励**：每个用户有 8 位邀请码与邀请链接（`/?ref=码`）。好友通过链接注册（或注册后 7 天内在账号页填码），**双方各得 7 天会员**（`REFERRAL_DAYS`，后台可改）；顺延累加到现有会员期之后。内测期间先登记、内测结束时统一发放。防刷：一个用户只能被邀请一次、不能填自己的码、每人最多因邀请获奖 `REFERRAL_MAX`（默认 20）次。
 - **内测微信群**：后台上传群二维码与说明后，账号页出现「内测微信群」入口。
@@ -139,22 +153,24 @@ Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-member
 ## 文件
 
 - `server.ts` — Express 服务：静态站点、登录、账号、付费、受保护的协作接口
-- `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`；`device`（桌面软件配对，云端）；`localmode`（桌面模式，本机）
-- `desktop/main.cjs` — Electron 外壳；`views/pair.html` — 配对页
+- `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`；`device`（设备授权，云端）；`localmode`（桌面模式、本机账号代理）；`desktop-account`（设备令牌账号服务）；`desktop-return` / `device-limits`（返回地址与请求限制）
+- `desktop/main.cjs` / `desktop/preload.cjs` — Electron 外壳与受限 IPC；`views/desktop-account.html` / `public/desktop-account.js` / `public/desktop-account.css` — 软件内登录、会员、订单与设备窗口；`views/pair.html` — 保留的旧版配对页
 - `billing/` — `settings`（站点设置：内测开关等）`access`（使用权）`catalog`（方案：早鸟 / 常规）`orders`（订单与支付事件）`referral`（邀请奖励）`plan`（公开方案信息）`routes`（定价 / 下单 / 回调 / 邀请）`admin`（站主后台接口）
 - `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）、图片 / 视频生成（`media` 围栏解析与流水线、`media-openai` 接口、`http` 带代理的 fetch）
 - `finalizer/` — 收尾 Agent：`types` `extract`（围栏识别与布局）`validate`（计划校验、路径与文件快照、机器检查）`executor`（Docker / 宿主执行）`service`（版本冻结、主流程、报告）`agent`（接入项目 agent）
 - `orchestrator.ts` — 协作循环与中英文提示词
-- `public/` — 首页 `index.html` + `site.css` + `site.js` + `site-i18n.js`；账号页；后台脚本 `admin.js`；工作台脚本 `app.js` / `style.css` / `i18n.js`
+- `public/` — 下载首页 `index.html` + `download-site.js` + `site.css` + `site-i18n.js`；浏览器授权 / 安全账号页使用 `site.js`；软件账号页使用 `desktop-account.js` / `desktop-account.css`；后台 `admin.js`；工作台 `app.js` / `style.css` / `i18n.js`
 - `views/app.html` — 工作台页面（仅经鉴权路由返回）；`views/admin.html` — 站主后台（仅管理员）
 - `scripts/` — `grant-entitlement` `confirm-order` `list-users`
-- `docs/` — 两份评审稿原文
+- `docs/` — 仓库协作、桌面账号、微信和支付接入说明，以及早期评审稿
 
 ## 桌面软件（保留本机 agent 识别与剪贴板中转）
 
-同一套代码可以打包成桌面应用：服务在用户自己的电脑上运行，识别本机 agent、剪贴板中转、一键发送全部可用；只有账号与使用权向 peergrading.ai 核对。
+同一套代码可以打包成桌面应用：服务在用户自己的电脑上运行，识别本机 agent、剪贴板中转、一键发送全部可用；账号、使用权与订单等向 peergrading.ai 核对，本机仓库操作不在云端执行。
 
-**配对流程**：软件首次打开显示 8 位配对码 → 点「在浏览器中登录并确认」打开 `peergrading.ai/device?code=…` → 登录（首次自动建号）并确认 → 软件拿到长期设备令牌。此后每次开始协作前向云端记一次试用用量并取回最新使用权；离线时沿用 72 小时内的缓存。账号页可查看并断开设备。
+**0.4 登录流程**：软件首次打开进入本机「账号与会员」页 → 点「登录 / 注册」 → 系统浏览器打开已填好连接码的授权页 → 用已开放的 Google / 微信渠道登录并确认 → 自动返回软件工作台。8 位字母数字连接码只在「连接码与手动连接（备用）」中展示，10 分钟内有效、成功兑换一次后失效，不是密码、邀请码或会员激活码。旧版仍可手动配对。
+
+设备令牌仅由本机后端保存，界面通过本机接口查看会员、订单、邀请与设备。微信支付在软件内显示订单二维码；海外银行卡通过系统浏览器打开 Airwallex 托管结账，再在软件查询支付结果。敏感身份操作继续要求浏览器登录及近期验证。每次开始协作前核对使用权；离线最多沿用最近 72 小时内的缓存，新登录、下单与支付核验需要联网。完整流程与故障说明见 [桌面登录与会员说明](docs/desktop-account.md)。
 
 ```bash
 npm run desktop               # 本地开发：打包并启动 Electron（连接 https://peergrading.ai）
@@ -183,7 +199,8 @@ npm test                      # 单元测试（agent 查找 / 启动方式，含
   - 收尾 Agent 在 Windows 上需要 Docker（宿主模式仅限 macOS / Linux）。
 - 桌面模式由环境变量 `LOCAL_MODE=1` 开启（Electron 自动设置），数据放在系统的应用数据目录；`CLOUD_URL` 指向云端（默认 `https://peergrading.ai`）。
 - Electron 44 自带 Node 24，直接运行 `dist/server.mjs`（esbuild 打包的同一份服务）。
-- 云端接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（网页确认）、`GET /api/device/me`、`POST /api/device/usage`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。
+- 云端设备接口：`POST /api/device/start|poll`（软件）、`POST /api/device/approve|deny`（浏览器确认）、`GET /api/device/me`、`POST /api/device/usage|logout`（Bearer 设备令牌）、`GET /api/device/list`、`POST /api/device/revoke`。
+- 软件账号接口：本机 `/api/local/account` 只代理白名单内的云端 `/api/desktop/account` 账号、订单、邀请和设备操作；长期令牌不会交给前端，也不会加入 URL。
 
 ## 部署到 peergrading.ai
 
@@ -193,7 +210,7 @@ npm test                      # 单元测试（agent 查找 / 启动方式，含
 
 **第一次部署**
 
-1. 把代码推到 GitHub（仓库名 `dual-agent-review-loop`）。
+1. 把代码推到 GitHub（仓库名 `peergrading`）。
 2. 域名 DNS：`peergrading.ai` 与 `www` 各加一条 A 记录指向服务器 IP。
 3. 在服务器上执行一次 `deploy/setup-server.sh <你的GitHub用户名>`：装 Docker 与 Caddy，拉代码，生成 `.env` 骨架并把 Caddy 配成自动 HTTPS。
 4. 编辑服务器上的 `/srv/peergrading/.env`：`BASE_URL=https://peergrading.ai`、`SESSION_SECRET`（脚本已生成）、Google 登录（`GOOGLE_CLIENT_ID/SECRET`，回调填 `https://peergrading.ai/auth/google/callback`）、收款信息。

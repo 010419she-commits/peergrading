@@ -1,5 +1,5 @@
 // billing/routes.ts — 定价 / 下单 / 订单查询 / 支付回调 / 邀请 / 本地模拟支付
-import express, { Router } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { config } from "../auth/config.ts";
 import { transaction } from "../auth/db.ts";
 import { requireBrowser, requireAuthApi } from "../auth/middleware.ts";
@@ -21,7 +21,7 @@ billing.get("/api/billing/status", (req, res) => {
 });
 
 /** 下单：返回订单号与付款指引。内测免费期间不开放（403 beta_free）；限量方案售罄 409 sold_out */
-billing.post("/api/billing/orders", requireBrowser, requireAuthApi, requireCsrf, async (req, res) => {
+export async function createBillingOrder(req: Request, res: Response) {
   const u = (req as any).user;
   if (betaFree()) return res.status(403).json({ error: "beta_free" });
   const plan = typeof req.body?.plan === "string" ? getPlan(req.body.plan) : null;
@@ -49,14 +49,15 @@ billing.post("/api/billing/orders", requireBrowser, requireAuthApi, requireCsrf,
   } catch (e: any) {
     res.status(e instanceof AuthError && e.code === "sold_out" ? 409 : 400).json({ error: e?.code || "failed" });
   }
-});
+}
+billing.post("/api/billing/orders", requireBrowser, requireAuthApi, requireCsrf, createBillingOrder);
 billing.get("/api/billing/orders/:no", requireAuthApi, (req, res) => {
   const u = (req as any).user;
   const o = getOrder(String(req.params.no));
   if (!o || o.user_id !== u.id) return res.status(404).json({ error: "not_found" });
   res.json({ order: orderView(o), access: accessStatus(u) });
 });
-function orderView(o: any) {
+export function orderView(o: any) {
   const s = siteSettings();
   const checkout = checkoutRecord(o.id);
   return { no: o.merchant_order_no, plan: o.plan_code, amountCents: o.amount_cents, currency: o.currency, status: o.status, createdAt: o.created_at, paidAt: o.paid_at,
@@ -78,14 +79,15 @@ billing.post("/api/billing/orders/:no/checkout", requireBrowser, requireAuthApi,
     res.status(status).json({ error: code });
   }
 });
-billing.post("/api/billing/orders/:no/sync", requireBrowser, requireAuthApi, requireCsrf, async (req, res) => {
+export async function syncBillingOrder(req: Request, res: Response) {
   const order = getOrder(String(req.params.no));
   if (!order || order.user_id !== (req as any).user.id) return res.status(404).json({ error: "not_found" });
   try {
     const result = await syncCheckout(order.merchant_order_no);
     res.json({ result, order: orderView(getOrder(order.merchant_order_no)), access: accessStatus((req as any).user) });
   } catch (error: any) { res.status(502).json({ error: error instanceof AuthError ? error.code : "payment_failed" }); }
-});
+}
+billing.post("/api/billing/orders/:no/sync", requireBrowser, requireAuthApi, requireCsrf, syncBillingOrder);
 
 /** 邀请：我的邀请码 / 链接 / 奖励；被邀请者在注册后一周内可手动填码 */
 billing.get("/api/referral", requireAuthApi, (req, res) => res.json({ referral: referralSummary((req as any).user.id) }));

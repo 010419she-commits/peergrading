@@ -1,6 +1,6 @@
 {
   "name": "peergrading",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "PeerGrading · 两个 AI 智能体互相审查、讨论、修改的协作循环（网站 + 桌面软件）",

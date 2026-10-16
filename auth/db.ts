@@ -196,3 +196,7 @@ CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id);
 // 旧库升级：users.referral_code（邀请码，首次查看时生成）
 if (!(db.prepare("PRAGMA table_info(users)").all() as any[]).some((c) => c.name === "referral_code")) db.exec("ALTER TABLE users ADD COLUMN referral_code TEXT");
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)");
+// Desktop browser approval may return only to a fixed loopback callback, never with a device token.
+for (const column of ["loopback_return_url", "loopback_state"]) {
+  if (!(db.prepare("PRAGMA table_info(device_codes)").all() as any[]).some((c) => c.name === column)) db.exec(`ALTER TABLE device_codes ADD COLUMN ${column} TEXT`);
+}

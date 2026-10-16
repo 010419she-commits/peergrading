@@ -16,6 +16,7 @@ import { cleanupTx } from "./auth/tx.ts";
 import { billing, paymentWebhook, wechatWebhook, airwallexWebhook } from "./billing/routes.ts";
 import { admin, isAdmin } from "./billing/admin.ts";
 import { device, cleanupDeviceCodes } from "./auth/device.ts";
+import { desktopAccount } from "./auth/desktop-account.ts";
 import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from "./auth/localmode.ts";
 import { recordUsage } from "./billing/access.ts";
 import { betaFree } from "./billing/settings.ts";
@@ -33,12 +34,23 @@ const here = config.root;
 const SESSIONS = path.resolve(process.env.SESSIONS_DIR || path.join(here, "sessions"));   // res.sendFile 要绝对路径
 const HOST = process.env.HOST || (localMode ? "127.0.0.1" : "0.0.0.0");
 const runs = new Map<string, AbortController>();
+const finalizeRuns = new Map<string, AbortController>();
 const liveRuns = new Map<string, number>();   // 进行中的协作 → 所属用户（session.json 写入前，媒体文件就要能看）
 const DATA_DIR = path.dirname(config.dbPath);   // media.json（图片 / 视频生成的 API Key）与 app.db 同目录
+if (localMode) process.on("peergrading:auth-logout", () => {
+  for (const controller of [...runs.values(), ...finalizeRuns.values()]) controller.abort();
+});
 
 const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+if (localMode) app.use((req, res, next) => {
+  try {
+    const host = new URL(`http://${req.headers.host || ""}`);
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(host.hostname) || Number(host.port || 80) !== config.port || host.username || host.password || host.pathname !== "/" || host.search || host.hash) throw new Error("host");
+    next();
+  } catch { res.status(403).json({ error: "invalid_host" }); }
+});
 
 // 支付回调：在任何 body 解析之前注册，保留原始字节供验签
 app.post("/api/payments/webhook", ...paymentWebhook);
@@ -54,10 +66,10 @@ if (localMode) {
   app.use((req, _res, next) => { (req as any).user = cachedUser(); (req as any).session = null; next(); });
   app.use(["/api", "/app", "/pair"], noStore);
   app.use(local);
-  app.get("/", (_req, res) => res.redirect(isPaired() ? "/app" : "/pair"));
-  app.get("/pair", (_req, res) => res.sendFile(path.join(here, "views", "pair.html")));
-  app.get("/app", (_req, res) => isPaired() ? res.sendFile(path.join(here, "views", "app.html")) : res.redirect("/pair"));
-  app.get(["/account", "/account.html", "/login"], (_req, res) => res.redirect(`${getCloudUrl()}/account`));
+  app.get("/", (_req, res) => res.redirect(isPaired() ? "/app" : "/account"));
+  app.get(["/pair", "/login"], (_req, res) => res.redirect("/account"));
+  app.get("/app", (_req, res) => isPaired() ? res.sendFile(path.join(here, "views", "app.html")) : res.redirect("/account"));
+  app.get(["/account", "/account.html"], (_req, res) => res.sendFile(path.join(here, "views", "desktop-account.html")));
 } else {
   app.use(attachUser);
   app.use(["/api", "/auth", "/login", "/app", "/account", "/device", "/admin"], noStore);
@@ -71,6 +83,7 @@ if (localMode) {
   app.use("/api/account", account);
   app.use(billing);
   app.use(device);
+  app.use(desktopAccount);
   /* ---------- 站主后台 ---------- */
   app.use(admin);
   app.get("/admin", (req, res) => {
@@ -91,7 +104,10 @@ if (localMode) {
   });
   /* ---------- 网页版工作台（需登录 + 试用/会员；生产默认关闭） ---------- */
   app.get("/app", (req, res, next) => (config.webWorkspace ? next() : res.redirect("/#download")), requireAccessPage, (_req, res) => res.sendFile(path.join(here, "views", "app.html")));
-  app.get(["/account", "/account.html"], (_req, res) => res.sendFile(path.join(here, "public", "account.html")));
+  app.get(["/account", "/account.html"], (req, res) => {
+    if (req.query.desktop === "1") return res.type("html").send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PeerGrading</title><link rel="stylesheet" href="/site.css"><main class="section narrow"><p class="eyebrow">PeerGrading</p><h1>请返回软件查看支付结果</h1><p class="lead">付款状态以支付渠道核验结果为准。在软件的「账号与会员」中点击「查询支付结果」。</p><p class="muted">Return to PeerGrading and refresh your order to check the verified payment result.</p><a class="button" href="/">下载官网 / Download</a></main></html>`);
+    res.sendFile(path.join(here, "public", "account.html"));
+  });
   app.get(["/device", "/device.html"], (_req, res) => res.sendFile(path.join(here, "public", "device.html")));
 }
 
@@ -234,15 +250,21 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
   const id = new Date().toISOString().replace(/[:.]/g, "-") + "-" + crypto.randomBytes(3).toString("hex");
   const dir = path.join(SESSIONS, id);
   const workspace = path.join(dir, "workspace");
+  const ac = new AbortController();
+  runs.set(id, ac);
+  res.once("close", () => { if (!res.writableEnded) ac.abort(); runs.delete(id); });
+  const cancelled = () => ac.signal.aborted || res.destroyed || (localMode && cachedUser()?.id !== u.id);
   let cfg: RunConfig;
   try {
     fs.mkdirSync(workspace, { recursive: true });
     cfg = await buildConfig(req.body, workspace, dir);
-  } catch (e: any) { return res.status(400).json({ error: e.message }); }
+  } catch (e: any) { runs.delete(id); if (cancelled()) return res.end(); return res.status(400).json({ error: e.message }); }
+  if (cancelled()) { runs.delete(id); return res.end(); }
   if (localMode) {
-    try { await reportUsage(id); }
-    catch (e: any) { return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
+    try { await reportUsage(id, u.id); }
+    catch (e: any) { runs.delete(id); if (res.destroyed) return; return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
   } else recordUsage(u, id);
+  if (cancelled()) { runs.delete(id); return res.end(); }
   // 图片 / 视频生成：由界面勾选决定本次是否允许；未配置 API Key 时提示并照常协作
   const want = { images: !cfg.repository && !!req.body?.media?.images, videos: !cfg.repository && !!req.body?.media?.videos };
   let mediaNote = "";
@@ -252,14 +274,13 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     if (provider) cfg.media = { provider, dir: path.join(dir, "media"), images: want.images && ms.images, videos: want.videos && ms.videos };
     else mediaNote = cfg.lang === "zh" ? "未配置图片 / 视频生成的 API Key，本次协作不生成媒体。" : "No API key is configured for image / video generation; this run produces no media.";
   }
-  const ac = new AbortController();
-  runs.set(id, ac); liveRuns.set(id, u.id);
+  if (cancelled()) { runs.delete(id); return res.end(); }
+  liveRuns.set(id, u.id);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   const events: Event[] = [];
   const send = (ev: Event) => { events.push(ev); if (!res.destroyed) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
   res.write(`data: ${JSON.stringify({ type: "run", id })}\n\n`);
   if (mediaNote) send({ type: "status", text: mediaNote });
-  res.on("close", () => { if (!res.writableEnded) ac.abort(); });
   let result: Awaited<ReturnType<typeof runCollaboration>> | null = null;
   try { result = await runCollaboration(cfg, send, ac.signal); }
   catch (e: any) {
@@ -302,7 +323,6 @@ function loadOwnedSession(req: express.Request): { id: string; dir: string; data
 
 api.get("/finalize/env", async (_req, res) => res.json({ docker: await dockerAvailable(), hostSupported: process.platform !== "win32", platform: process.platform }));
 
-const finalizeRuns = new Map<string, AbortController>();
 api.post("/finalize", requireCsrf, requireAccessApi, async (req, res) => {
   const owned = loadOwnedSession(req);
   if (!owned) return res.status(404).json({ error: "not_found" });
@@ -311,8 +331,13 @@ api.post("/finalize", requireCsrf, requireAccessApi, async (req, res) => {
   const versions = owned.data.result?.versions ?? [];
   const v = versions.find((x: any) => x.n === n);
   if (!v) return res.status(400).json({ error: "bad_version" });
+  const runId = crypto.randomUUID(), ac = new AbortController(), userId = (req as any).user.id;
+  finalizeRuns.set(runId, ac);
+  res.once("close", () => { if (!res.writableEnded) ac.abort(); finalizeRuns.delete(runId); });
+  const cancelled = () => ac.signal.aborted || res.destroyed || (localMode && cachedUser()?.id !== userId);
   const info = getCachedAgent(String(req.body?.agentId ?? "")) ?? (await detectAgents()).find((a) => a.id === req.body?.agentId);
-  if (!info || info.kind === "relay") return res.status(400).json({ error: "bad_agent" });
+  if (cancelled()) { finalizeRuns.delete(runId); return res.end(); }
+  if (!info || info.kind === "relay") { finalizeRuns.delete(runId); return res.status(400).json({ error: "bad_agent" }); }
   // 旧会话可能没有 versionIds：按需冻结
   let versionIds: Record<number, string> = owned.data.versionIds ?? {};
   if (!versionIds[n]) {
@@ -321,16 +346,13 @@ api.post("/finalize", requireCsrf, requireAccessApi, async (req, res) => {
   }
   const store = new VersionStore(owned.dir);
   let version: Version;
-  try { version = await store.get(versionIds[n]); } catch (e: any) { return res.status(400).json({ error: e?.message ?? "bad_version" }); }
+  try { version = await store.get(versionIds[n]); } catch (e: any) { finalizeRuns.delete(runId); if (cancelled()) return res.end(); return res.status(400).json({ error: e?.message ?? "bad_version" }); }
+  if (cancelled()) { finalizeRuns.delete(runId); return res.end(); }
   const sandbox = req.body?.sandbox === "host" ? "host" : "docker";
   const maxFixAttempts = Math.min(3, Math.max(0, Number(req.body?.maxFixAttempts) || 0));
-  const runId = crypto.randomUUID();
-  const ac = new AbortController();
-  finalizeRuns.set(runId, ac);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-  const send = (ev: any) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
+  const send = (ev: any) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
   send({ type: "run", runId, versionId: version.id });
-  res.on("close", () => { if (!res.writableEnded) ac.abort(); });
   try {
     const result = await runFinalizer({
       task: owned.data.config.task, version, sessionDir: owned.dir,
