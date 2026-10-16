@@ -18,7 +18,7 @@ import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from
 import { recordUsage } from "./billing/access.ts";
 import { betaFree } from "./billing/settings.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
-import { loadMediaSettings, saveMediaSettings, publicMediaSettings, createMediaProvider, MEDIA_FILE_RE, mediaMime } from "./agents/media.ts";
+import { loadMediaSettings, saveMediaSettings, publicMediaSettings, minimalMediaSettings, createMediaProvider, MEDIA_FILE_RE, mediaMime } from "./agents/media.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor, windowsProcessNames } from "./agents/detect.ts";
 import { submitRelayReply, ignoreRelayText, sendToApp, listRunningApps, markOwnClipboardText, runInTerminal } from "./agents/relay.ts";
 import { getProxyEnv } from "./agents/proxy.ts";
@@ -28,7 +28,7 @@ import { dockerAvailable } from "./finalizer/executor.ts";
 import type { Version } from "./finalizer/types.ts";
 
 const here = config.root;
-const SESSIONS = process.env.SESSIONS_DIR || path.join(here, "sessions");
+const SESSIONS = path.resolve(process.env.SESSIONS_DIR || path.join(here, "sessions"));   // res.sendFile 要绝对路径
 const HOST = process.env.HOST || (localMode ? "127.0.0.1" : "0.0.0.0");
 const runs = new Map<string, AbortController>();
 const liveRuns = new Map<string, number>();   // 进行中的协作 → 所属用户（session.json 写入前，媒体文件就要能看）
@@ -141,7 +141,11 @@ api.post("/stop/:id", requireCsrf, (req, res) => { runs.get(String(req.params.id
 
 /* ---------- 图片 / 视频生成（OpenAI）：设置只存在本机 / 服务器的 data/media.json；桌面模式人人可改，云端仅管理员 ---------- */
 const canEditMedia = (req: express.Request) => localMode || isAdmin((req as any).user);
-api.get("/media/settings", (req, res) => res.json({ ...publicMediaSettings(loadMediaSettings(DATA_DIR)), canEdit: canEditMedia(req) }));
+api.get("/media/settings", (req, res) => {
+  const s = loadMediaSettings(DATA_DIR);
+  // 非管理员只需要知道能不能用：不给 Key 片段、中转地址与模型名
+  res.json(canEditMedia(req) ? { ...publicMediaSettings(s), canEdit: true } : { ...minimalMediaSettings(s), canEdit: false });
+});
 api.post("/media/settings", requireCsrf, (req, res) => {
   if (!canEditMedia(req)) return res.status(404).json({ error: "not_found" });
   const b = req.body || {};

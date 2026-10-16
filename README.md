@@ -114,7 +114,7 @@ Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-member
 
 - 侧栏「图片 / 视频生成」里填 OpenAI API Key（桌面版任何人可填，网页版仅管理员；也可用 `.env` 的 `MEDIA_API_KEY` / `OPENAI_API_KEY`）。Key 只写进本机 / 服务器 `data/media.json`（0600），前端只看到首尾几位。
 - 勾选「允许生成图片 / 视频」后，系统提示词多出第 6 条规则：成果需要配图或视频时，智能体写 ```` ```image aspect=16:9 ```` / ```` ```video seconds=8 ```` 围栏描述画面，服务端在每条发言结束后调用 `gpt-image-1` / `sora-2` 生成，把围栏替换成 `![描述](media://文件名)`。替换后的正文进入对方的上下文与成果版本，所以另一位智能体审查时看到的是同一个引用，修改成果时按规则原样保留。
-- 文件存在 `sessions/<时间>/media/`，只有会话所有者能通过 `/api/sessions/:id/media/:file` 读取；相同描述在同一次协作中只生成一次。每条消息最多 3 图 1 视频，每次协作合计最多 6 图 2 视频（`MEDIA_MAX_IMAGES` / `MEDIA_MAX_VIDEOS`）；失败、超限或未开启时围栏被替换为一行说明，协作照常进行。
+- 文件存在 `sessions/<时间>/media/`（桌面版在应用数据目录下的 `sessions/`），只有会话所有者能通过 `/api/sessions/:id/media/:file` 读取；相同描述在同一次协作中只生成一次。每条消息最多 3 图 1 视频，每次协作合计最多 6 图 2 视频（`MEDIA_MAX_IMAGES` / `MEDIA_MAX_VIDEOS`，只按成功次数计）；失败、超限或未开启时围栏被替换为一行说明（按协作语言给出原因），协作照常进行；用户点「停止」时正在进行的生成随之取消。目前没有自动清理：删除会话目录即可连同其中的媒体一起删掉。
 - 请求走系统代理（`HTTPS_PROXY` / `NO_PROXY`），`MEDIA_BASE_URL` 可指向兼容 OpenAI 的中转站。
 
 ## 文件
