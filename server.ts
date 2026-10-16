@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { config } from "./auth/config.ts";
+import { config, wechatOpenReady } from "./auth/config.ts";
 import "./auth/db.ts";
 import { attachBrowser, cleanupBrowsers } from "./auth/browser.ts";
 import { attachUser, noStore, requireAuthApi, requireAccessApi, requireAccessPage } from "./auth/middleware.ts";
@@ -320,6 +320,6 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 setInterval(() => { cleanupTx(); cleanupBrowsers(); if (!localMode) cleanupDeviceCodes(); }, 10 * 60 * 1000).unref();
 app.listen(config.port, HOST, () => {
   console.log(localMode ? `PeerGrading 桌面模式: http://${HOST}:${config.port}  (cloud=${getCloudUrl()}, paired=${isPaired()})`
-    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, beta=${betaFree()}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
+    : `${config.plan.name}: ${config.baseUrl}  (devLogin=${config.devLogin}, google=${!!config.google.clientId}, wechat=${wechatOpenReady()}, beta=${betaFree()}, plan=${config.plan.mode === "days" ? config.plan.priceCents / 100 + " " + config.plan.currency + "/" + config.plan.days + "d" : "buyout"})`);
   detectAgents().then((a) => console.log(`已识别 ${a.length} 个 agent：` + a.map((x) => `${typeof x.title === "string" ? x.title : x.title.zh}[${x.status}]`).join(", ")));
 });

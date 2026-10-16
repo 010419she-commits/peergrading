@@ -82,6 +82,7 @@
       f.lastChild.dataset.provider = provider; return f;
     };
     let any = false;
+    if (p?.wechat?.available) { any = true; box.append(form("wechat", p.wechat.mode === "mp" ? t("loginWechat") : t("loginWechatQr"))); }
     if (p?.google?.available) { any = true; box.append(form("google", t("loginGoogle"))); if (p.google.hint) box.append(el("p", { className: "fine", textContent: p.google.hint })); }
     if (p?.dev?.available) { any = true; box.append(form("dev", t("loginDev"))); }
     if (!any) box.append(el("p", { className: "muted", textContent: t("noProviders") }));
@@ -262,12 +263,21 @@
       if (pending && !a.permanent && !S.plan?.beta) { const b = el("button", { className: "text-link", type: "button", textContent: t("continuePay") }); b.addEventListener("click", () => startPurchase(pending.plan_code)); root.append(b); }
     }).catch(() => {});
     // 身份
-    const names = { google: "Google", wechat: t("wechat"), dev: t("devAccount") };
+    const names = { google: "Google", wechat: t("wechat"), dev: t("devAccount") }, chan = { mp: t("chanMp"), open: t("chanQr") };
     const ids = S.user.identities, providersHeld = new Set(ids.map((i) => i.provider));
     const canRemove = ids.length > 1;
     const needVerify = () => toast(t("needVerify"), 6000);
     const list = el("ul", { className: "id-list" });
-    for (const i of ids) {
+    // 微信：扫码与公众号两个身份显示为一组，整组解绑；重新验证只能在对应渠道里做
+    const wx = ids.filter((i) => i.provider === "wechat");
+    if (wx.length) {
+      const li = el("li", {}, el("span", { textContent: `${t("wechat")} · ${wx.map((i) => `${chan[i.channel] || ""}${i.display_name ? " " + i.display_name : ""}`).join(" / ")}` }));
+      const ops = el("div", { className: "ops" });
+      for (const i of wx) { const ok = !!S.providers?.wechat?.available && S.providers.wechat.mode === (i.channel === "mp" ? "mp" : "qr"); const b = el("button", { className: "text-link", type: "button", textContent: `${t("reverify")}（${chan[i.channel] || ""}）`, disabled: !ok }); b.addEventListener("click", busy(b, () => reverify(i.id))); ops.append(b); }
+      if (canRemove && ids.length > wx.length) { const b = el("button", { className: "text-link", type: "button", textContent: t("unbindWechat") }); b.addEventListener("click", busy(b, () => unbind({ provider: "wechat" }, t("confirmUnbindWechat")))); ops.append(b); }
+      li.append(ops); list.append(li);
+    }
+    for (const i of ids.filter((i) => i.provider !== "wechat")) {
       const li = el("li", {}, el("span", { textContent: `${names[i.provider] || i.provider}${i.display_name ? " · " + i.display_name : ""}` }));
       const ops = el("div", { className: "ops" });
       const rv = el("button", { className: "text-link", type: "button", textContent: t("reverify"), disabled: !S.providers?.[i.provider]?.available }); rv.addEventListener("click", busy(rv, () => reverify(i.id))); ops.append(rv);
@@ -276,8 +286,10 @@
     }
     root.append(el("h3", { textContent: t("identitiesTitle") }), list);
     const bindRow = el("div", { className: "bind-row" });
-    for (const p of ["google", "dev"]) {
-      if (!S.providers?.[p]?.available || providersHeld.has(p)) continue;
+    for (const p of ["wechat", "google", "dev"]) {
+      if (!S.providers?.[p]?.available) continue;
+      if (p !== "wechat" && providersHeld.has(p)) continue;
+      if (p === "wechat" && wx.some((i) => i.channel === (S.providers.wechat.mode === "mp" ? "mp" : "open"))) continue;   // 当前渠道的微信身份已关联
       const b = el("button", { className: "button small", type: "button", textContent: t("bind") + names[p] });
       b.addEventListener("click", busy(b, async () => {
         if (!S.user.recentlyVerified) return needVerify();

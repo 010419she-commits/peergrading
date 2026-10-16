@@ -32,12 +32,12 @@ npm start        # 正式运行：需要 .env（见 .env.example）
 
 ## 登录与账号（v9 规格）
 
-- Google 登录（面向海外发布；微信登录已移除）；首次登录自动建账号。
+- 微信登录（开放平台「网站应用」扫码；在微信内置浏览器里打开时改用公众号授权）与 Google 登录；首次登录自动建账号。
 - 浏览器认证版本 `auth_epoch`、一次性认证事务、服务端会话（HttpOnly Cookie）、与会话绑定的 CSRF 令牌、返回位置白名单。
-- 账号页支持切换账号、重新验证、绑定 / 解绑，至少保留一种登录方式。
+- 账号页支持切换账号、重新验证、绑定 / 解绑（解绑微信时整组移除），至少保留一种登录方式。
 - 本地开发可用 `DEV_LOGIN=1` 启用“开发者登录”，不需要任何第三方凭证即可走通全部流程；生产环境该入口不存在。
 
-Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部分不再适用）。
+Google OAuth 与微信开放平台的申请步骤见 `docs/final-v9-login-membership.md` §8。微信：在 [open.weixin.qq.com](https://open.weixin.qq.com) 注册开发者账号（需企业资质）→ 创建「网站应用」，授权回调域填 `peergrading.ai` → 审核通过后把 AppID / AppSecret 写进服务器 `.env`（`ssh root@服务器 /srv/peergrading/deploy/set-wechat.sh`，密钥不要经过聊天或代码仓库）。只要 `.env` 里没有微信凭证，登录页就不显示微信按钮。
 
 ## 内测免费 → 开放订阅
 

@@ -30,6 +30,11 @@ export const config = {
   sessionSecret,
   dbPath: path.join(dataDir, "app.db"),
   google: { clientId: process.env.GOOGLE_CLIENT_ID || "", clientSecret: process.env.GOOGLE_CLIENT_SECRET || "" },
+  /** 微信登录：open = 开放平台「网站应用」扫码登录（必填项）；mp = 公众号（微信内置浏览器里登录，可选） */
+  wechat: {
+    open: { appId: process.env.WECHAT_OPEN_APPID || "", secret: process.env.WECHAT_OPEN_SECRET || "", unionDomain: process.env.WECHAT_OPEN_UNION_DOMAIN || "" },
+    mp:   { appId: process.env.WECHAT_MP_APPID || "",   secret: process.env.WECHAT_MP_SECRET || "",   unionDomain: process.env.WECHAT_MP_UNION_DOMAIN || "" },
+  },
   /** 本地开发登录（无需任何第三方凭证）。仅当非生产 + BASE_URL 为 localhost + DEV_LOGIN=1 */
   devLogin: !isProd && isLocalBase && process.env.DEV_LOGIN === "1",
   /** 云端的网页版工作台（用服务器上的 agent）。产品主体是桌面软件，生产默认关闭 */
@@ -72,3 +77,5 @@ export const config = {
 };
 
 export const googleReady = () => !!(config.google.clientId && config.google.clientSecret);
+export const wechatOpenReady = () => !!(config.wechat.open.appId && config.wechat.open.secret);
+export const wechatMpReady = () => !!(config.wechat.mp.appId && config.wechat.mp.secret);
