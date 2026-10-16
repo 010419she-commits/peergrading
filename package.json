@@ -15,7 +15,8 @@
     "desktop:local-cloud": "npm run bundle && CLOUD_URL=http://localhost:3001 electron .",
     "dist:mac": "npm run bundle && electron-builder --mac",
     "dist:win": "npm run bundle && electron-builder --win --x64 --arm64",
-    "dist:all": "npm run bundle && electron-builder --mac --win --x64 --arm64"
+    "dist:all": "npm run bundle && electron-builder --mac --win --x64 --arm64",
+    "test": "node --test test/*.test.ts"
   },
   "engines": {
     "node": ">=24"
@@ -56,7 +57,12 @@
         "zip"
       ],
       "darkModeSupport": true,
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "win": {
       "target": [

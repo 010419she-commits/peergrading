@@ -6,6 +6,9 @@ import { execFile, spawn } from "node:child_process";
 import type { AgentInfo, RunnerSpec, Text } from "./types.ts";
 import { clipboardAvailable } from "./relay.ts";
 import { getProxyEnv, proxyEnvPrefix } from "./proxy.ts";
+import { WIN, POWERSHELL, findBin, spawnCli, killTree, quoteForDisplay, stripNestedClaudeEnv, resetLaunchers } from "./launch.ts";
+
+export { findBin, needsShell } from "./launch.ts";
 
 const L = (zh: string, en: string): Text => ({ zh, en });
 
@@ -13,45 +16,35 @@ const HOME = os.homedir();
 const LMSTUDIO_URL = process.env.LMSTUDIO_URL ?? "http://localhost:1234";
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 
-const EXTRA_BIN_DIRS = [
-  path.join(HOME, ".local", "bin"),
-  path.join(HOME, ".claude", "local"),
-  path.join(HOME, ".npm-global", "bin"),
-  path.join(HOME, ".lmstudio", "bin"),
-  "/usr/local/bin",
-  "/opt/homebrew/bin",
-];
-
 type AgentDraft = Omit<AgentInfo, "auto"> & { auto?: boolean };
 
-export function findBin(name: string): string | null {
-  const dirs = [...(process.env.PATH ?? "").split(path.delimiter), ...EXTRA_BIN_DIRS];
-  // 也扫描所有 node 版本目录（nvm / 自定义安装）
-  for (const d of [path.join(HOME, ".local"), path.join(HOME, ".nvm", "versions", "node")]) {
-    try {
-      for (const sub of fs.readdirSync(d)) dirs.push(path.join(d, sub, "bin"));
-    } catch {}
-  }
-  const exts = process.platform === "win32" ? ["", ...(process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").toLowerCase().split(";")] : [""];
-  if (process.platform === "win32") dirs.push(path.join(process.env.APPDATA || "", "npm"), path.join(process.env.LOCALAPPDATA || "", "Programs"));
-  for (const d of dirs) {
-    if (!d) continue;
-    for (const ext of exts) {
-      const p = path.join(d, name + ext);
-      try {
-        fs.accessSync(p, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
-        if (fs.statSync(p).isFile()) return p;
-      } catch {}
-    }
-  }
+/** Claude Code 的配置目录（CLAUDE_CONFIG_DIR 可改） */
+const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, ".claude");
+/** Codex 的配置目录（CODEX_HOME 可改；Windows 上同样是 %USERPROFILE%\.codex，桌面版与命令行共用） */
+const CODEX_HOME = process.env.CODEX_HOME || path.join(HOME, ".codex");
+
+/** 在 root 下最多 depth 层内找名为 name 的文件（版本号目录按数字倒序，取最新的） */
+function findFileUnder(root: string, name: string, depth: number): string | null {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) if (e.isFile() && e.name.toLowerCase() === name.toLowerCase()) return path.join(root, e.name);
+  if (depth <= 0) return null;
+  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const d of dirs) { const hit = findFileUnder(path.join(root, d), name, depth - 1); if (hit) return hit; }
   return null;
 }
 
-/** Windows 上的 .cmd / .bat 包装脚本必须经 shell 启动（Node 18.20+ 直接 spawn 会 EINVAL） */
-export const needsShell = (bin: string) => process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
-
-/** Claude 桌面版内置的 Claude Code 二进制（不在 PATH 上时作为后备） */
+/** Claude 桌面版内置的 Claude Code 二进制（不在 PATH 上时作为后备）。
+ *  macOS：~/Library/Application Support/Claude/claude-code/<版本>/<hash>/claude.app/Contents/MacOS/claude；
+ *  Windows：对应的 userData 目录 %APPDATA%\Claude\claude-code\…（商店版在 %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude-code），内部布局未经证实，按文件名在几层内找 claude.exe */
 function findBundledClaude(): string | null {
+  if (WIN) {
+    const local = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+    const roots = [path.join(process.env.APPDATA || path.join(HOME, "AppData", "Roaming"), "Claude", "claude-code")];
+    for (const d of subdirs(path.join(local, "Packages"))) if (/^Claude_/.test(d)) roots.push(path.join(local, "Packages", d, "LocalCache", "Roaming", "Claude", "claude-code"));
+    for (const r of roots) { const hit = findFileUnder(r, "claude.exe", 3); if (hit) return hit; }
+    return null;
+  }
   const root = path.join(HOME, "Library", "Application Support", "Claude", "claude-code");
   try {
     const versions = fs.readdirSync(root).filter((v) => /^\d+\.\d+\.\d+$/.test(v))
@@ -71,22 +64,16 @@ function readJson(file: string): any {
 }
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === "CLAUDECODE" || k.startsWith("CLAUDE_")) continue; // 避免嵌套会话的干扰
-    env[k] = v;
-  }
+  const env = stripNestedClaudeEnv();   // 避免嵌套会话的干扰，但保留 CLAUDE_CODE_GIT_BASH_PATH / CLAUDE_CONFIG_DIR 等 Windows 上需要的配置
   for (const [k, v] of Object.entries(getProxyEnv())) if (!env[k]) env[k] = v;
   return env;
 }
 
 function run(bin: string, args: string[], stdin: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
-    const child = needsShell(bin)
-      ? spawn(`"${bin}"`, args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)), { env: cleanEnv(), cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"], shell: true })
-      : spawn(bin, args, { env: cleanEnv(), cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawnCli(bin, args, { env: cleanEnv(), cwd: os.tmpdir() });
     let stdout = "", stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const timer = setTimeout(() => killTree(child, "SIGKILL"), timeoutMs);
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("close", (code) => { clearTimeout(timer); resolve({ stdout, stderr, code }); });
@@ -137,7 +124,7 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
   const onPath = findBin("claude");
   const bin = onPath ?? findBundledClaude();
   if (!bin) return null;
-  const settings = readJson(path.join(HOME, ".claude", "settings.json"));
+  const settings = readJson(path.join(CLAUDE_DIR, "settings.json"));
   const configuredModel: string | undefined = process.env.ANTHROPIC_MODEL ?? settings?.model;
 
   const info: AgentDraft = {
@@ -157,7 +144,9 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
   let loggedIn: boolean | null = null;
   try { const j = JSON.parse(st.stdout.slice(st.stdout.indexOf("{"))); if (typeof j.loggedIn === "boolean") loggedIn = j.loggedIn; } catch {}
   const px = proxyEnvPrefix();
-  const notLoggedInHint = onPath ? L(`${px}claude auth login`, `${px}claude auth login`) : L(`npm install -g @anthropic-ai/claude-code && ${px}claude auth login`, `npm install -g @anthropic-ai/claude-code && ${px}claude auth login`);
+  const claudeCmd = WIN ? quoteForDisplay(bin) : "claude";   // Windows 终端的 PATH 可能还没刷新，给完整路径
+  const and = WIN ? "; " : " && ";   // PowerShell 5.1 不认 &&
+  const notLoggedInHint = onPath ? L(`${px}${claudeCmd} auth login`, `${px}${claudeCmd} auth login`) : L(`${px}npm install -g @anthropic-ai/claude-code${and}claude auth login`, `${px}npm install -g @anthropic-ai/claude-code${and}claude auth login`);
   if (loggedIn === true) { info.status = "ready"; return info; }
   if (loggedIn === false) {
     info.status = "not_logged_in";
@@ -171,7 +160,7 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
   if (/not logged in/i.test(p.text) || /not logged in/i.test(r.stderr)) {
     info.status = "not_logged_in";
     info.statusDetail = L("命令行尚未登录（桌面版的登录不共享给命令行）", "The CLI is not logged in (the desktop app login is not shared with the CLI)");
-    info.hintCommand = onPath ? L("claude   # 然后输入 /login", "claude   # then type /login") : L("npm install -g @anthropic-ai/claude-code && claude   # 然后输入 /login", "npm install -g @anthropic-ai/claude-code && claude   # then type /login");
+    info.hintCommand = onPath ? L(`${px}${claudeCmd}   # 然后输入 /login`, `${px}${claudeCmd}   # then type /login`) : L(`${px}npm install -g @anthropic-ai/claude-code${and}claude   # 然后输入 /login`, `${px}npm install -g @anthropic-ai/claude-code${and}claude   # then type /login`);
   } else if (p.isError || r.code !== 0) {
     info.status = "error";
     info.statusDetail = (p.error || r.stderr || `exit ${r.code}`).slice(0, 300);
@@ -296,37 +285,74 @@ function detectGemini(): AgentDraft | null {
     status: "unverified", icon: "G", runner: { type: "gemini-cli", bin, model: settings?.model?.name } };
 }
 
-/** Codex CLI：PATH 上的 codex，或 ChatGPT 桌面版内置的 codex-cli */
-function findCodexBin(): { bin: string; bundled: boolean } | null {
+/** 列出目录里的子目录名（不存在则为空） */
+function subdirs(dir: string): string[] {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { return []; }
+}
+
+/** 商店（MSIX）应用的安装目录：WindowsApps 不让列目录，但 Get-AppxPackage 能告诉当前用户装在哪 */
+async function appxInstallLocation(name: string): Promise<string | null> {
+  if (!WIN) return null;
+  const local = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+  if (!subdirs(path.join(local, "Packages")).some((d) => d.startsWith(name + "_"))) return null;   // 没装过就不用起 PowerShell
+  const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $p = Get-AppxPackage -Name '${name.replace(/'/g, "''")}' | Select-Object -First 1; if ($p) { [Console]::Out.Write($p.InstallLocation) }`;
+  return new Promise((resolve) => {
+    execFile(POWERSHELL, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+      { encoding: "utf8", timeout: 15_000, windowsHide: true }, (err, stdout) => resolve(!err && stdout.trim() ? stdout.trim() : null));
+  });
+}
+
+/** Codex CLI：PATH / 常见安装目录上的 codex，否则各安装方式的固定位置，最后是 ChatGPT 桌面版内置的 codex */
+async function findCodexBin(): Promise<{ bin: string; bundled: boolean } | null> {
   const onPath = findBin("codex");
   if (onPath) return { bin: onPath, bundled: false };
-  const candidates = [
-    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
-    path.join(HOME, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex"),
-  ];
-  try {
-    for (const rt of fs.readdirSync(path.join(HOME, ".cache", "codex-runtimes"))) {
-      candidates.push(path.join(HOME, ".cache", "codex-runtimes", rt, "bin", "codex"));
+  const standalone: string[] = [];   // 独立安装（install.ps1 / install.sh / winget / scoop）
+  const bundled: string[] = [];      // 桌面应用自带的
+  if (process.env.CODEX_CLI_PATH) standalone.push(process.env.CODEX_CLI_PATH);   // ChatGPT 桌面版也认这个变量
+  if (WIN) {
+    const local = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+    const triple = process.arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+    // 官方 install.ps1：%LOCALAPPDATA%\Programs\OpenAI\Codex\bin 是到 %USERPROFILE%\.codex\packages\standalone\current\bin 的联接
+    const cur = path.join(CODEX_HOME, "packages", "standalone", "current");
+    standalone.push(path.join(cur, "bin", "codex.exe"), path.join(cur, "codex.exe"));
+    // winget：便携包解压后保留带平台后缀的文件名
+    for (const root of [path.join(local, "Microsoft", "WinGet", "Packages"), path.join(process.env.ProgramFiles || "C:\\Program Files", "WinGet", "Packages")]) {
+      for (const d of subdirs(root)) if (/^OpenAI\.Codex_/i.test(d)) standalone.push(path.join(root, d, `codex-${triple}.exe`), path.join(root, d, "codex.exe"));
     }
-  } catch {}
-  for (const c of candidates) {
-    try { fs.accessSync(c, fs.constants.X_OK); return { bin: c, bundled: true }; } catch {}
+    // ChatGPT（原 Codex）Windows 桌面版（商店 MSIX 包 OpenAI.Codex）自带命令行：<安装目录>\app\resources\codex.exe；
+    // 启动后也可能复制到 %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\。它与命令行共用 %USERPROFILE%\.codex 的登录
+    const appBin = path.join(local, "OpenAI", "Codex", "bin");
+    for (const h of subdirs(appBin)) if (!h.startsWith(".")) bundled.push(path.join(appBin, h, "codex.exe"));
+    const appx = await appxInstallLocation("OpenAI.Codex");
+    if (appx) bundled.push(path.join(appx, "app", "resources", "codex.exe"), path.join(appx, "resources", "codex.exe"));
+  } else {
+    bundled.push(
+      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+      path.join(HOME, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex"),
+    );
+    for (const rt of subdirs(path.join(HOME, ".cache", "codex-runtimes"))) bundled.push(path.join(HOME, ".cache", "codex-runtimes", rt, "bin", "codex"));
+    standalone.push(path.join(CODEX_HOME, "packages", "standalone", "current", "bin", "codex"));
   }
+  const usable = (p: string) => { try { fs.accessSync(p, WIN ? fs.constants.F_OK : fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; } };
+  for (const c of standalone) if (usable(c)) return { bin: c, bundled: false };
+  for (const c of bundled) if (usable(c)) return { bin: c, bundled: true };
   return null;
 }
 
 async function detectCodex(): Promise<AgentDraft | null> {
-  const found = findCodexBin();
+  const found = await findCodexBin();
   if (!found) return null;
   let model: string | undefined;
   try {
-    const toml = fs.readFileSync(path.join(HOME, ".codex", "config.toml"), "utf8");
+    const toml = fs.readFileSync(path.join(CODEX_HOME, "config.toml"), "utf8");
     const m = toml.match(/^model\s*=\s*"([^"]+)"/m);
     if (m) model = m[1];
   } catch {}
-  const auth = readJson(path.join(HOME, ".codex", "auth.json"));
-  const authMode: string | undefined = auth?.auth_mode ?? (auth?.OPENAI_API_KEY ? "apikey" : undefined);
+  // auth.json：新版本写 auth_mode；旧版本只有 tokens（ChatGPT 登录）或 OPENAI_API_KEY
+  const auth = readJson(path.join(CODEX_HOME, "auth.json"));
+  const authMode: string | undefined = auth?.auth_mode ?? (auth?.tokens?.access_token || auth?.tokens?.id_token ? "chatgpt" : auth?.OPENAI_API_KEY ? "apikey" : undefined);
 
+  const codexLogin = `${proxyEnvPrefix()}${WIN ? quoteForDisplay(found.bin) : "codex"} login`;   // Windows 终端的 PATH 可能没有它，给完整路径
   const info: AgentDraft = {
     id: "codex", kind: "cli", icon: "C",
     title: "Codex",
@@ -340,7 +366,7 @@ async function detectCodex(): Promise<AgentDraft | null> {
   if (!authMode) {
     info.status = "not_logged_in";
     info.statusDetail = L("Codex 尚未登录", "Codex is not signed in yet");
-    info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : "codex login";
+    info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : codexLogin;
     return info;
   }
   const r = await run(found.bin, ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "notify=[]",
@@ -360,7 +386,7 @@ async function detectCodex(): Promise<AgentDraft | null> {
     const msg = err || r.stderr || `exit ${r.code}`;
     info.status = /login|auth|sign in|unauthorized|401/i.test(msg) ? "not_logged_in" : "error";
     info.statusDetail = msg.slice(0, 300);
-    if (info.status === "not_logged_in") info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : "codex login";
+    if (info.status === "not_logged_in") info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : codexLogin;
   }
   return info;
 }
@@ -423,33 +449,53 @@ async function detectKimiApi(): Promise<AgentDraft | null> {
   return info;
 }
 
-/** 桌面版 agent 应用：没有命令行，用剪贴板中转接入（一键发送会把它切到前台） */
-const DESKTOP_AGENT_APPS: { app: string; title: string; zh: string; en: string; icon: string }[] = [
+/** 桌面版 agent 应用：没有命令行，用剪贴板中转接入（一键发送会把它切到前台）。
+ *  win.dir：Windows 安装目录（相对 %LOCALAPPDATA% / %ProgramFiles% 自动拼接）；win.pkg：商店应用的包名前缀（看 %LOCALAPPDATA%\Packages）；
+ *  win.proc：Windows 进程名（Get-Process 用），缺省同 app */
+const DESKTOP_AGENT_APPS: { app: string; title: string; zh: string; en: string; icon: string; win?: { dir?: string[]; pkg?: string[]; proc?: string[] } }[] = [
   { app: "Kimi Code", title: "Kimi Code", zh: "Moonshot 云端 · 桌面应用", en: "Moonshot cloud · desktop app", icon: "K" },
   { app: "Kimi", title: "Kimi", zh: "Moonshot 云端 · 桌面应用", en: "Moonshot cloud · desktop app", icon: "K" },
-  { app: "Claude", title: "Claude（桌面版）", zh: "Anthropic 云端 · 桌面应用", en: "Anthropic cloud · desktop app", icon: "✴︎" },
-  { app: "ChatGPT", title: "ChatGPT / Codex（桌面版）", zh: "OpenAI 云端 · 桌面应用", en: "OpenAI cloud · desktop app", icon: "C" },
+  { app: "Claude", title: "Claude（桌面版）", zh: "Anthropic 云端 · 桌面应用", en: "Anthropic cloud · desktop app", icon: "✴︎", win: { dir: ["AnthropicClaude"], pkg: ["Claude"], proc: ["claude"] } },
+  { app: "ChatGPT", title: "ChatGPT / Codex（桌面版）", zh: "OpenAI 云端 · 桌面应用", en: "OpenAI cloud · desktop app", icon: "C", win: { pkg: ["OpenAI.Codex", "OpenAI.ChatGPT-Desktop"], proc: ["ChatGPT", "Codex"] } },   // 现在的 ChatGPT（含 Codex）商店包叫 OpenAI.Codex；OpenAI.ChatGPT-Desktop 是老的 ChatGPT Classic
   { app: "Qwen Code", title: "Qwen Code（桌面版）", zh: "阿里云端 · 桌面应用", en: "Alibaba cloud · desktop app", icon: "Q" },
-  { app: "Cursor", title: "Cursor", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "▸" },
-  { app: "Windsurf", title: "Windsurf", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "W" },
-  { app: "Trae", title: "Trae", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "T" },
-  { app: "Trae CN", title: "Trae CN", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "T" },
-  { app: "Kiro", title: "Kiro", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "K" },
-  { app: "Qoder", title: "Qoder", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "Q" },
-  { app: "CodeBuddy", title: "CodeBuddy", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "B" },
-  { app: "Antigravity", title: "Antigravity", zh: "Google · 桌面应用", en: "Google · desktop app", icon: "A" },
-  { app: "Zed", title: "Zed", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "Z" },
-  { app: "Visual Studio Code", title: "VS Code（Copilot）", zh: "桌面应用（Copilot Chat）", en: "Desktop app (Copilot Chat)", icon: "V" },
+  { app: "Cursor", title: "Cursor", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "▸", win: { dir: ["Programs\\cursor"], proc: ["Cursor"] } },
+  { app: "Windsurf", title: "Windsurf", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "W", win: { dir: ["Programs\\Windsurf"] } },
+  { app: "Trae", title: "Trae", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "T", win: { dir: ["Programs\\Trae"] } },
+  { app: "Trae CN", title: "Trae CN", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "T", win: { dir: ["Programs\\Trae CN"] } },
+  { app: "Kiro", title: "Kiro", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "K", win: { dir: ["Programs\\Kiro"] } },
+  { app: "Qoder", title: "Qoder", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "Q", win: { dir: ["Programs\\Qoder"] } },
+  { app: "CodeBuddy", title: "CodeBuddy", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "B", win: { dir: ["Programs\\CodeBuddy"] } },
+  { app: "Antigravity", title: "Antigravity", zh: "Google · 桌面应用", en: "Google · desktop app", icon: "A", win: { dir: ["Programs\\Antigravity"] } },
+  { app: "Zed", title: "Zed", zh: "桌面应用（编辑器内的 Agent）", en: "Desktop app (editor agent)", icon: "Z", win: { dir: ["Programs\\Zed", "Zed"] } },
+  { app: "Visual Studio Code", title: "VS Code（Copilot）", zh: "桌面应用（Copilot Chat）", en: "Desktop app (Copilot Chat)", icon: "V", win: { dir: ["Programs\\Microsoft VS Code", "Microsoft VS Code"], proc: ["Code"] } },
 ];
+
+/** Windows 一键发送时用来找进程的名字候选（剪贴板中转切前台） */
+export function windowsProcessNames(app: string): string[] {
+  const meta = DESKTOP_AGENT_APPS.find((a) => a.app === app);
+  return [...new Set([...(meta?.win?.proc ?? []), app, app.replace(/\s+/g, "")].filter((s): s is string => !!s))];
+}
 
 function detectDesktopApps(): AgentDraft[] {
   const out: AgentDraft[] = [];
   const dirs = ["/Applications", path.join(HOME, "Applications")];
-  const winDirs = process.platform === "win32" ? [path.join(process.env.LOCALAPPDATA || "", "Programs"), process.env.ProgramFiles || "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", process.env.LOCALAPPDATA || ""] : [];
+  const local = process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local");
+  const roots = [local, process.env.ProgramFiles || "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)"];
+  const existsAny = (ps: string[]) => ps.some((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  let packages: string[] | null = null;   // 商店（MSIX）应用：安装目录读不了，但 %LOCALAPPDATA%\Packages\<包名>_<hash> 在首次运行后存在
+  const hasPackage = (prefix: string) => {
+    if (packages === null) { try { packages = fs.readdirSync(path.join(local, "Packages")); } catch { packages = []; } }
+    return packages.some((d) => d.startsWith(prefix + "_"));
+  };
   for (const a of DESKTOP_AGENT_APPS) {
-    const found = process.platform === "win32"
-      ? winDirs.some((d) => d && (fs.existsSync(path.join(d, a.app)) || fs.existsSync(path.join(d, a.app.replace(/\s+/g, ""))) || fs.existsSync(path.join(d, a.app, `${a.app}.exe`))))
-      : dirs.some((d) => fs.existsSync(path.join(d, `${a.app}.app`)));
+    let found: boolean;
+    if (WIN) {
+      const candidates = [...(a.win?.dir ?? []), `Programs\\${a.app}`, `Programs\\${a.app.replace(/\s+/g, "")}`, a.app]
+        .flatMap((rel) => roots.map((r) => path.join(r, rel)));
+      found = existsAny(candidates) || (a.win?.pkg ?? []).some(hasPackage);
+    } else {
+      found = dirs.some((d) => fs.existsSync(path.join(d, `${a.app}.app`)));
+    }
     if (!found) continue;
     out.push({
       id: `app:${a.app}`, kind: "relay", icon: a.icon, title: /桌面版|\(/.test(a.title) ? a.title : `${a.title}（桌面应用）`,
@@ -500,6 +546,7 @@ const SCAN_MODELS = process.env.SCAN_MODELS === "1";   // 默认只扫描 agent�
 export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
   if (!refresh && cache && Date.now() - cache.at < TTL) return cache.agents;
   if (inflight) return inflight;
+  if (refresh) resetLaunchers();   // CLI 升级后包装脚本背后的目标可能变了
   inflight = (async () => {
     const qwenBin = findBin("qwen");
     const [claude, qwen, cdx, kimiApi, lm, ollama] = await Promise.all([
@@ -531,19 +578,27 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
 }
 
 /** 一键登录：返回要在终端里执行的命令。Claude Code 若支持 `auth login` 子命令就直接用，否则进入交互界面并提示输入 /login */
-export async function loginCommandFor(id: string): Promise<{ command: string; note: "none" | "type_login" | "follow_prompt" } | null> {
+export interface LoginCommand {
+  command: string;                                  // 给用户看 / 复制的完整命令（含代理前缀）
+  argv: string[];                                   // 在终端窗口里实际执行的 [程序, ...参数]（代理通过环境变量注入）
+  proxy: boolean;                                   // 是否需要带系统代理
+  note: "none" | "type_login" | "follow_prompt";
+}
+export async function loginCommandFor(id: string): Promise<LoginCommand | null> {
   const a = getCachedAgent(id);
   if (!a) return null;
-  const q = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
+  const q = quoteForDisplay;
+  const mk = (argv: string[], proxy: boolean, note: LoginCommand["note"]): LoginCommand =>
+    ({ argv, proxy, note, command: `${proxy ? proxyEnvPrefix() : ""}${q(argv[0])}${argv.slice(1).map((x) => ` ${x}`).join("")}` });
   if (a.runner.type === "claude-code") {
     const r = await run(a.runner.bin, ["auth", "--help"], "", 15_000);
     const hasAuth = r.code === 0 && /login/i.test(r.stdout);
     // 国内网络直连 Anthropic 会 403，登录命令带上系统代理
-    return hasAuth ? { command: `${proxyEnvPrefix()}${q(a.runner.bin)} auth login`, note: "none" } : { command: `${proxyEnvPrefix()}${q(a.runner.bin)}`, note: "type_login" };
+    return hasAuth ? mk([a.runner.bin, "auth", "login"], true, "none") : mk([a.runner.bin], true, "type_login");
   }
-  if (a.runner.type === "qwen-code") return { command: q(a.runner.bin), note: "follow_prompt" };
-  if (a.runner.type === "codex") return { command: `${proxyEnvPrefix()}${q(a.runner.bin)} login`, note: "none" };
-  if (a.runner.type === "generic") return { command: q(a.runner.bin), note: "follow_prompt" };
+  if (a.runner.type === "qwen-code") return mk([a.runner.bin], false, "follow_prompt");
+  if (a.runner.type === "codex") return mk([a.runner.bin, "login"], true, "none");
+  if (a.runner.type === "generic") return mk([a.runner.bin], false, "follow_prompt");
   return null;
 }
 

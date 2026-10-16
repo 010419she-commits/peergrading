@@ -1,17 +1,12 @@
 // agents/backends.ts — 把不同来源的模型统一成 Backend.chat()
-import { spawn } from "node:child_process";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from "./types.ts";
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
-import { needsShell } from "./detect.ts";
+import { WIN, launcherFor, spawnCli, killTree, stripNestedClaudeEnv } from "./launch.ts";
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === "CLAUDECODE" || k.startsWith("CLAUDE_")) continue;
-    env[k] = v;
-  }
+  const env = stripNestedClaudeEnv();
   // 境外服务（Anthropic / OpenAI）在国内直连会被拒，给命令行 agent 带上系统代理
   for (const [k, v] of Object.entries(getProxyEnv())) if (!env[k]) env[k] = v;
   return env;
@@ -110,8 +105,8 @@ class CliBackend implements Backend {
     let input = renderTranscript(req.turns, req.lang);
     const prefixed = `[System instructions]\n${req.system}\n\n${input}`;
     const bin = (this.spec as any).bin as string;
-    const viaShell = needsShell(bin);
-    // Windows .cmd 包装脚本：经 shell 启动时无法安全传递含换行/引号的长参数，系统提示词改从 stdin 前置
+    // 只有退回 cmd.exe 启动的 .cmd 包装脚本才无法安全传递含换行/引号的长参数：那时系统提示词改从 stdin 前置
+    const viaShell = launcherFor(bin).shell;
     let { args, useStdin, prefixSystem, textMode } = buildCliArgs(this.spec, viaShell ? "" : req.system, prefixed);
     if (viaShell) {
       const i = args.indexOf("--system-prompt"); if (i >= 0) args.splice(i, 2);
@@ -119,15 +114,18 @@ class CliBackend implements Backend {
     }
     if (prefixSystem) input = prefixed;
 
+    // 把整段提示词当命令行参数传的工具，在 Windows 上受限：cmd.exe 传不了含换行的参数；CreateProcess 的命令行上限 32767 字符
+    const promptInArgs = this.spec.type === "generic" && this.spec.promptVia === "arg";
+    if (promptInArgs && viaShell) return Promise.reject(new Error(`${this.spec.type}: 这个工具在 Windows 上通过 .cmd 脚本启动，无法把提示词作为参数传入；请改用它的 .exe 安装方式`));
+    if (promptInArgs && WIN && [bin, ...args].reduce((n, a) => n + a.length + 3, 0) > 32_000) return Promise.reject(new Error(`${this.spec.type}: 对话记录太长，超出了 Windows 命令行参数的长度上限，请新开一轮协作`));
+
     return new Promise((resolve, reject) => {
-      const child = viaShell
-        ? spawn(`"${bin}"`, args.map((a) => (/[\s"]/.test(a) || a === "" ? `"${a.replace(/"/g, '\\"')}"` : a)), { env: cleanEnv(), cwd: req.cwd, stdio: ["pipe", "pipe", "pipe"], shell: true })
-        : spawn(bin, args, { env: cleanEnv(), cwd: req.cwd, stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawnCli(bin, args, { env: cleanEnv(), cwd: req.cwd });
       let buf = "", streamed = "", assistantText = "", result: string | undefined, model: string | undefined, stderr = "";
       let usage: { input: number; output: number } | undefined;
       let error: string | undefined;
 
-      const onAbort = () => child.kill("SIGTERM");
+      const onAbort = () => killTree(child, "SIGTERM");
       req.signal.addEventListener("abort", onAbort, { once: true });
 
       let raw = "";
