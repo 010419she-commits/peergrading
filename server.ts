@@ -18,6 +18,7 @@ import { localMode, local, isPaired, cachedUser, reportUsage, getCloudUrl } from
 import { recordUsage } from "./billing/access.ts";
 import { betaFree } from "./billing/settings.ts";
 import { runCollaboration, type RunConfig, type Event } from "./orchestrator.ts";
+import { loadMediaSettings, saveMediaSettings, publicMediaSettings, createMediaProvider, MEDIA_FILE_RE, mediaMime } from "./agents/media.ts";
 import { detectAgents, getCachedAgent, startService, loginCommandFor, windowsProcessNames } from "./agents/detect.ts";
 import { submitRelayReply, ignoreRelayText, sendToApp, listRunningApps, markOwnClipboardText, runInTerminal } from "./agents/relay.ts";
 import { getProxyEnv } from "./agents/proxy.ts";
@@ -30,6 +31,8 @@ const here = config.root;
 const SESSIONS = process.env.SESSIONS_DIR || path.join(here, "sessions");
 const HOST = process.env.HOST || (localMode ? "127.0.0.1" : "0.0.0.0");
 const runs = new Map<string, AbortController>();
+const liveRuns = new Map<string, number>();   // 进行中的协作 → 所属用户（session.json 写入前，媒体文件就要能看）
+const DATA_DIR = path.dirname(config.dbPath);   // media.json（图片 / 视频生成的 API Key）与 app.db 同目录
 
 const app = express();
 app.set("trust proxy", 1);
@@ -136,6 +139,34 @@ api.get("/sessions/:id", (req, res) => {
 });
 api.post("/stop/:id", requireCsrf, (req, res) => { runs.get(String(req.params.id))?.abort(); res.json({ stopped: runs.has(String(req.params.id)) }); });
 
+/* ---------- 图片 / 视频生成（OpenAI）：设置只存在本机 / 服务器的 data/media.json；桌面模式人人可改，云端仅管理员 ---------- */
+const canEditMedia = (req: express.Request) => localMode || isAdmin((req as any).user);
+api.get("/media/settings", (req, res) => res.json({ ...publicMediaSettings(loadMediaSettings(DATA_DIR)), canEdit: canEditMedia(req) }));
+api.post("/media/settings", requireCsrf, (req, res) => {
+  if (!canEditMedia(req)) return res.status(404).json({ error: "not_found" });
+  const b = req.body || {};
+  const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 500) : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+  const s = saveMediaSettings(DATA_DIR, { apiKey: str(b.apiKey), baseUrl: str(b.baseUrl), imageModel: str(b.imageModel), videoModel: str(b.videoModel), images: bool(b.images), videos: bool(b.videos) });
+  res.json({ ok: true, ...publicMediaSettings(s), canEdit: true });
+});
+/** 协作中生成的图片 / 视频：只给会话所有者看 */
+const sessionOwner = (id: string): number | null => {
+  const f = path.join(SESSIONS, id, "session.json");
+  try { const fd = fs.openSync(f, "r"); const buf = Buffer.alloc(256); const n = fs.readSync(fd, buf, 0, 256, 0); fs.closeSync(fd); const m = buf.subarray(0, n).toString("utf8").match(/"userId":\s*(\d+)/); return m ? Number(m[1]) : null; }
+  catch { return null; }
+};
+api.get("/sessions/:id/media/:file", (req, res) => {
+  const u = (req as any).user;
+  const id = String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, ""), file = String(req.params.file);
+  if (!id || !MEDIA_FILE_RE.test(file)) return res.status(404).json({ error: "not_found" });
+  const owner = liveRuns.get(id) ?? sessionOwner(id);
+  const f = path.join(SESSIONS, id, "media", file);
+  if (owner !== u.id || !fs.existsSync(f)) return res.status(404).json({ error: "not_found" });
+  res.set("Cache-Control", "private, max-age=31536000, immutable");
+  res.type(mediaMime(file)).sendFile(f);
+});
+
 async function buildConfig(raw: any, cwd: string): Promise<RunConfig> {
   const task = String(raw?.task ?? "").trim();
   if (!task) throw new Error("EMPTY_TASK");
@@ -165,12 +196,22 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     try { await reportUsage(id); }
     catch (e: any) { return res.status(e?.code === "payment_required" ? 403 : 401).json({ error: e?.code ?? "unauthenticated", access: e?.access }); }
   } else recordUsage(u, id);
+  // 图片 / 视频生成：由界面勾选决定本次是否允许；未配置 API Key 时提示并照常协作
+  const want = { images: !!req.body?.media?.images, videos: !!req.body?.media?.videos };
+  let mediaNote = "";
+  if (want.images || want.videos) {
+    const ms = loadMediaSettings(DATA_DIR);
+    const provider = await createMediaProvider(ms).catch(() => null);
+    if (provider) cfg.media = { provider, dir: path.join(dir, "media"), images: want.images && ms.images, videos: want.videos && ms.videos };
+    else mediaNote = cfg.lang === "zh" ? "未配置图片 / 视频生成的 API Key，本次协作不生成媒体。" : "No API key is configured for image / video generation; this run produces no media.";
+  }
   const ac = new AbortController();
-  runs.set(id, ac);
+  runs.set(id, ac); liveRuns.set(id, u.id);
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
   const events: Event[] = [];
   const send = (ev: Event) => { events.push(ev); res.write(`data: ${JSON.stringify(ev)}\n\n`); };
   res.write(`data: ${JSON.stringify({ type: "run", id })}\n\n`);
+  if (mediaNote) send({ type: "status", text: mediaNote });
   req.on("close", () => ac.abort());
   let result: Awaited<ReturnType<typeof runCollaboration>> | null = null;
   try { result = await runCollaboration(cfg, send, ac.signal); }
@@ -182,8 +223,10 @@ api.post("/run", requireCsrf, requireAccessApi, async (req, res) => {
     try {
       const strip = (c: any) => ({ ...c, agent: { ...c.agent, runner: undefined } });
       const versionIds = await saveVersions(id, dir, result);
-      fs.writeFileSync(path.join(dir, "session.json"), JSON.stringify({ id, userId: u.id, config: { ...cfg, agentA: strip(cfg.agentA), agentB: strip(cfg.agentB) }, result, events, versionIds }, null, 2));
+      const { media: _m, ...cfgNoMedia } = cfg;   // provider 对象不进 session.json
+      fs.writeFileSync(path.join(dir, "session.json"), JSON.stringify({ id, userId: u.id, config: { ...cfgNoMedia, agentA: strip(cfg.agentA), agentB: strip(cfg.agentB), media: cfg.media ? { images: cfg.media.images, videos: cfg.media.videos } : undefined }, result, events, versionIds }, null, 2));
     } catch (e) { console.error("session save failed", e); }
+    liveRuns.delete(id);
     res.end();
   }
 });

@@ -47,6 +47,23 @@
         <div><label data-i18n="rounds"></label><input id="rounds" type="number" min="1" max="10" value="3"></div>
         <div><label data-i18n="turns"></label><input id="turns" type="number" min="1" max="3" value="1"></div>
       </div>
+      <div class="group" data-i18n="mediaTitle"></div>
+      <div class="media-opts">
+        <label class="check"><input type="checkbox" id="media-images"><span data-i18n="mediaImages"></span></label>
+        <label class="check"><input type="checkbox" id="media-videos"><span data-i18n="mediaVideos"></span></label>
+        <div class="hint" id="media-hint"></div>
+        <details id="media-config" hidden>
+          <summary data-i18n="mediaConfig"></summary>
+          <label data-i18n="mediaKey"></label><input id="media-key" type="password" autocomplete="off" spellcheck="false">
+          <label data-i18n="mediaBase"></label><input id="media-base" spellcheck="false">
+          <div class="row">
+            <div><label data-i18n="mediaImageModel"></label><input id="media-image-model" spellcheck="false"></div>
+            <div><label data-i18n="mediaVideoModel"></label><input id="media-video-model" spellcheck="false"></div>
+          </div>
+          <div class="row btns"><button class="btn sm primary" id="media-save" type="button" data-i18n="mediaSave"></button><button class="btn sm" id="media-clear" type="button" data-i18n="mediaClear"></button></div>
+          <div class="hint" id="media-msg"></div>
+        </details>
+      </div>
       <div class="actions">
         <button class="btn primary" id="start" data-i18n="start"></button>
         <button class="btn" id="stop" data-i18n="stop" disabled></button>

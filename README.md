@@ -110,13 +110,20 @@ Google OAuth 申请步骤见 `docs/final-v9-login-membership.md` §8（微信部
 - 左侧时间线实时流式显示全部发言，等待时显示已等待秒数与模型推理进度；右侧是各版本成果，结束后定位最终版。
 - 会话按用户保存在 `sessions/<时间>/session.json`，可回放。
 
+### 协作中生成图片 / 视频
+
+- 侧栏「图片 / 视频生成」里填 OpenAI API Key（桌面版任何人可填，网页版仅管理员；也可用 `.env` 的 `MEDIA_API_KEY` / `OPENAI_API_KEY`）。Key 只写进本机 / 服务器 `data/media.json`（0600），前端只看到首尾几位。
+- 勾选「允许生成图片 / 视频」后，系统提示词多出第 6 条规则：成果需要配图或视频时，智能体写 ```` ```image aspect=16:9 ```` / ```` ```video seconds=8 ```` 围栏描述画面，服务端在每条发言结束后调用 `gpt-image-1` / `sora-2` 生成，把围栏替换成 `![描述](media://文件名)`。替换后的正文进入对方的上下文与成果版本，所以另一位智能体审查时看到的是同一个引用，修改成果时按规则原样保留。
+- 文件存在 `sessions/<时间>/media/`，只有会话所有者能通过 `/api/sessions/:id/media/:file` 读取；相同描述在同一次协作中只生成一次。每条消息最多 3 图 1 视频，每次协作合计最多 6 图 2 视频（`MEDIA_MAX_IMAGES` / `MEDIA_MAX_VIDEOS`）；失败、超限或未开启时围栏被替换为一行说明，协作照常进行。
+- 请求走系统代理（`HTTPS_PROXY` / `NO_PROXY`），`MEDIA_BASE_URL` 可指向兼容 OpenAI 的中转站。
+
 ## 文件
 
 - `server.ts` — Express 服务：静态站点、登录、账号、付费、受保护的协作接口
 - `auth/` — v9 参考实现的移植：`config` `db`（node:sqlite）`security` `browser` `tx` `session` `users` `entitlements` `finish` `google` `wechat` `dev` `middleware` `routes`；`device`（桌面软件配对，云端）；`localmode`（桌面模式，本机）
 - `desktop/main.cjs` — Electron 外壳；`views/pair.html` — 配对页
 - `billing/` — `settings`（站点设置：内测开关等）`access`（使用权）`catalog`（方案：早鸟 / 常规）`orders`（订单与支付事件）`referral`（邀请奖励）`plan`（公开方案信息）`routes`（定价 / 下单 / 回调 / 邀请）`admin`（站主后台接口）
-- `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）
+- `agents/` — 自动识别（`detect`）、统一调用层（`backends`）、中转（`relay`）、系统代理（`proxy`）、图片 / 视频生成（`media` 围栏解析与流水线、`media-openai` 接口、`http` 带代理的 fetch）
 - `finalizer/` — 收尾 Agent：`types` `extract`（围栏识别与布局）`validate`（计划校验、路径与文件快照、机器检查）`executor`（Docker / 宿主执行）`service`（版本冻结、主流程、报告）`agent`（接入项目 agent）
 - `orchestrator.ts` — 协作循环与中英文提示词
 - `public/` — 首页 `index.html` + `site.css` + `site.js` + `site-i18n.js`；账号页；后台脚本 `admin.js`；工作台脚本 `app.js` / `style.css` / `i18n.js`
