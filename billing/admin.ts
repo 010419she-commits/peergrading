@@ -57,11 +57,11 @@ const adminOrders = () => q(`SELECT o.merchant_order_no AS no, o.user_id AS user
 
 export const admin = Router();
 admin.get("/api/admin/overview", requireAuthApi, requireAdminApi, (req, res) => {
-  const users = adminUsers();
+  const users = adminUsers(), orders = adminOrders();
   res.json({
-    me: { id: (req as any).user.id }, settings: { ...siteSettings(), referralMax: config.referral.maxPerUser, referralClaimDays: config.referral.claimDays }, earlyBird: earlyBirdStats(), users, orders: adminOrders(),
-    stats: { users: users.length, members: users.filter((x) => x.access.member).length, trialActive: users.filter((x) => !x.access.member && x.access.trialActive).length,
-      pendingOrders: adminOrders().filter((o: any) => o.status === "pending").length,
+    me: { id: (req as any).user.id }, settings: { ...siteSettings(), referralMax: config.referral.maxPerUser, referralClaimDays: config.referral.claimDays }, earlyBird: earlyBirdStats(), users, orders,
+    stats: { users: Number(q("SELECT COUNT(*) AS c FROM users").get()?.c ?? 0), listed: users.length, members: users.filter((x) => x.access.member).length, trialActive: users.filter((x) => !x.access.member && x.access.trialActive).length,
+      pendingOrders: Number(q("SELECT COUNT(*) AS c FROM orders WHERE merchant_id = ? AND status = 'pending'").get(config.payment.merchantId)?.c ?? 0),
       pendingReferrals: Number(q("SELECT COUNT(*) AS c FROM referrals WHERE settled_at IS NULL").get()?.c ?? 0), referrals: Number(q("SELECT COUNT(*) AS c FROM referrals").get()?.c ?? 0) },
   });
 });
@@ -131,7 +131,7 @@ admin.post("/api/admin/orders/:no/confirm", requireBrowser, requireAuthApi, requ
   if (!o) return res.status(404).json({ error: "not_found" });
   try {
     const r = processPayment({ provider: "manual", eventId: `manual-${o.merchant_order_no}`, merchantOrderNo: o.merchant_order_no, amountCents: o.amount_cents, currency: o.currency,
-      providerTxnId: String(req.body?.txn || "").trim().slice(0, 80) || `admin-${u.id}-${now()}`, payload: JSON.stringify({ by: "admin", adminId: u.id, at: now() }) });
+      providerTxnId: String(req.body?.txn || "").trim().slice(0, 80) || `manual-${o.merchant_order_no}`, payload: JSON.stringify({ by: "admin", adminId: u.id, at: now() }) });
     res.json({ ok: true, result: r, access: accessStatus(getUser(o.user_id)) });
   } catch (e: any) { res.status(e instanceof AuthError ? 409 : 500).json({ error: e?.code || "failed" }); }
 });

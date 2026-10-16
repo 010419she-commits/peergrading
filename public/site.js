@@ -176,9 +176,9 @@
       if (pl.limit != null) card.append(el("span", { className: "badge" + (pl.left > 0 ? "" : " soft"), textContent: pl.left > 0 ? t("slotsLeft")(pl.left) : t("soldOut") }));
       const btn = el("button", { className: "button button-primary", type: "button" });
       if (p.beta) { btn.textContent = t("openAfterBeta"); btn.disabled = true; }
+      else if (pl.limit != null && !(pl.left > 0)) { btn.textContent = t("soldOut"); btn.disabled = true; }
       else if (S.status !== "authenticated") { btn.textContent = t("loginToBuy"); btn.onclick = () => openLogin({ returnTo: "/account#pricing" }); }
       else if (a?.permanent) { btn.textContent = t("alreadyMember"); btn.disabled = true; }
-      else if (pl.limit != null && !(pl.left > 0)) { btn.textContent = t("soldOut"); btn.disabled = true; }
       else { btn.textContent = a?.member && pl.mode === "days" ? t("renew") : t("buyNow"); btn.addEventListener("click", busy(btn, () => startPurchase(pl.code))); }
       card.append(btn); host.append(card);
     }
@@ -243,7 +243,7 @@
     const kv = el("dl", { className: "kv" });
     const row = (k, v) => kv.append(el("dt", { textContent: k }), el("dd", { textContent: v }));
     row(t("statusLabel"), accessLine(a));
-    row(t("daysLeftLabel"), a.daysLeft == null ? t("permanentLabel") : t("daysUnit")(a.daysLeft));
+    row(t("daysLeftLabel"), a.daysLeft == null ? t("permanentLabel") : a.beta && !a.member ? t("betaUnlimited") : t("daysUnit")(a.daysLeft));
     row(t("usedLabel"), String(a.trial.used));
     row(t("sinceLabel"), fmtDate(S.user.createdAt));
     row(t("userIdLabel"), String(S.user.id));

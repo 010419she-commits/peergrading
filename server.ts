@@ -76,7 +76,7 @@ if (localMode) {
     res.sendFile(path.join(here, "views", "admin.html"));
   });
   // 后台上传的收款码 / 微信群二维码：只给已登录用户看（账号页、订单页、后台）
-  app.use("/uploads", (req, res, next) => ((req as any).user ? next() : res.status(401).type("text").send("Unauthorized")), express.static(config.uploadsDir, { index: false, dotfiles: "deny", maxAge: "1h" }));
+  app.use("/uploads", (req, res, next) => ((req as any).user ? next() : res.status(401).type("text").send("Unauthorized")), express.static(config.uploadsDir, { index: false, dotfiles: "deny", maxAge: "1h", setHeaders: (res) => res.set("Cache-Control", "private, max-age=3600") }));
   /* ---------- 软件下载 ---------- */
   const DOWNLOADS = process.env.DOWNLOADS_DIR || path.join(here, "downloads");
   app.use("/download", express.static(DOWNLOADS, { index: false, dotfiles: "deny" }));

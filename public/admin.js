@@ -28,7 +28,8 @@
     if (!S.csrf) await window.SiteAuth?.bootstrap?.();
     const r = await api("/api/admin/overview");
     if (r.status === 401) { root.replaceChildren(el("p", { className: "muted", textContent: "请先登录。" })); return window.SiteAuth?.openLogin({ returnTo: "/admin" }); }
-    if (!r.ok) { root.replaceChildren(el("p", { className: "muted", textContent: "当前账号不是管理员。在服务器的 .env 里设置 ADMIN_USER_IDS=<你的用户 ID>（账号页可查看），或执行 npm run grant -- <用户ID> admin permanent，然后刷新。" })); return; }
+    if (r.status === 404) { root.replaceChildren(el("p", { className: "muted", textContent: "当前账号不是管理员。在服务器的 .env 里设置 ADMIN_USER_IDS=<你的用户 ID>（账号页可查看），或执行 npm run grant -- <用户ID> admin permanent，然后刷新。" })); return; }
+    if (!r.ok) { const b = el("button", { className: "button small", type: "button", textContent: "重试" }); b.addEventListener("click", load); root.replaceChildren(el("p", { className: "muted", textContent: `加载失败（${errText(r.error)}）。` }), b); return; }
     D = r; render();
   }
 
@@ -46,8 +47,8 @@
     const betaChk = el("input", { type: "checkbox", checked: s.betaFree });
     betaBox.append(el("label", { className: "inline" }, betaChk, "内测免费：所有登录用户免费使用，不显示购买入口，桌面软件不弹付费提示"),
       el("p", { className: "fine", textContent: s.betaFree
-        ? "关闭后：按会员 / 试用规则放行，试用结束或会员到期即停止使用；内测期间注册的用户从关闭那一刻起重新计算 3 天 / 5 次试用；已登记但未发放的邀请奖励立即发放。"
-        : `内测已于 ${fmtDate(s.betaEndedAt)} 关闭。重新开启后所有用户再次免费。` }));
+        ? "关闭后：按会员 / 试用规则放行，试用结束或会员到期即停止使用；所有用户的 3 天 / 5 次试用从关闭那一刻起重新计算（内测期间的用量不计）；已登记但未发放的邀请奖励立即发放。"
+        : `内测已于 ${fmtDate(s.betaEndedAt)} 关闭。重新开启后所有用户再次免费；之后再关闭时，试用期会再次从那一刻重新计算。` }));
     const betaBtn = el("button", { className: "button small button-primary", type: "button", textContent: "保存开关" });
     betaBtn.addEventListener("click", busy(betaBtn, async () => {
       if (betaChk.checked === s.betaFree) return toast("没有改动");
@@ -78,7 +79,7 @@
       el("label", {}, "早鸟终身版名额（前 N 名）", ebLimit),
       el("label", {}, "早鸟价格（元）", ebPrice),
       el("label", {}, "邀请奖励天数（邀请者与被邀请者各得）", refDays)));
-    ebBox.append(el("p", { className: "fine", textContent: `早鸟已售 ${eb.sold}，待支付占用 ${eb.reserved}，剩余 ${eb.left}。待支付订单 24 小时内占用名额。邀请奖励：每人最多因邀请获奖 ${s.referralMax ?? "20"} 次（.env REFERRAL_MAX 可改），被邀请者注册后一周内可填码。` }));
+    ebBox.append(el("p", { className: "fine", textContent: `早鸟已售 ${eb.sold}，待支付占用 ${eb.reserved}，剩余 ${eb.left}。待支付订单 24 小时内占用名额。邀请奖励：每人最多因邀请获奖 ${s.referralMax ?? "20"} 次（.env REFERRAL_MAX 可改），被邀请者注册后 ${s.referralClaimDays ?? 7} 天内可填码（.env REFERRAL_CLAIM_DAYS）。` }));
     const ebSave = el("button", { className: "button small button-primary", type: "button", textContent: "保存" });
     ebSave.addEventListener("click", busy(ebSave, async () => {
       // 留空的字段不提交（否则 Number("") === 0 会把名额或奖励天数改成 0）
@@ -141,7 +142,7 @@
           el("td", { textContent: u.providers.map((p) => ({ google: "Google", wechat: "微信", dev: "开发者" }[p] || p)).join(" / ") || "—" }),
           el("td", { textContent: fmtDate(u.createdAt) }), el("td", { textContent: fmtDate(u.lastActive) }), el("td", { textContent: u.runs }),
           el("td", {}, statusOf(a), D.settings.betaFree ? el("span", { className: "tag", textContent: "内测免费中" }) : ""),
-          el("td", { textContent: a.daysLeft == null ? "永久" : `${a.daysLeft} 天` }), el("td", { textContent: u.invited }));
+          el("td", { textContent: a.daysLeft == null ? "永久" : s.betaFree && !a.member ? "内测免费" : `${a.daysLeft} 天` }), el("td", { textContent: u.invited }));
         const days = el("input", { className: "mini", type: "number", min: 1, step: 1, value: 30 });
         const give = el("button", { className: "button mini", type: "button", textContent: "赠送天数" });
         give.addEventListener("click", busy(give, async () => {
@@ -160,7 +161,7 @@
     };
     filter.addEventListener("input", draw); draw();
     uTbl.append(uTb); uWrap.append(uTbl);
-    root.append(el("h3", { textContent: `用户（${users.length}）` }), filter, el("p", { className: "fine", textContent: "剩余天数：永久会员显示「永久」；会员按到期日计算；试用中按试用期末计算；内测免费期间所有用户都可使用，天数仅供参考。" }), uWrap);
+    root.append(el("h3", { textContent: `用户（${st.users}${st.listed < st.users ? `，仅列出最近 ${st.listed} 位` : ""}）` }), filter, el("p", { className: "fine", textContent: "剩余天数：永久会员显示「永久」；会员按到期日计算；试用中按试用期末计算；内测免费期间所有用户都可使用，天数仅供参考。" }), uWrap);
   }
 
   function uploadRow(label, kind, url) {
