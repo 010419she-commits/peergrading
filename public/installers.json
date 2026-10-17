@@ -1,5 +1,38 @@
 {
   "version": "0.6.0",
   "repo": "010419she-commits/peergrading",
-  "assets": []
+  "assets": [
+    {
+      "name": "PeerGrading-0.6.0-macos-arm64.dmg",
+      "url": "https://github.com/010419she-commits/peergrading/releases/download/v0.6.0/PeerGrading-0.6.0-macos-arm64.dmg",
+      "platform": "macos",
+      "arch": "arm64",
+      "size": 131683224,
+      "sha256": "694d5ac098139259b00b68f5c1d89f16943a5f3203c0caa13b3cc6c936984e03"
+    },
+    {
+      "name": "PeerGrading-0.6.0-macos-x64.dmg",
+      "url": "https://github.com/010419she-commits/peergrading/releases/download/v0.6.0/PeerGrading-0.6.0-macos-x64.dmg",
+      "platform": "macos",
+      "arch": "x64",
+      "size": 135239836,
+      "sha256": "aab16702e385d377adcf4c4f1f85e2cab27e9a3a97a26eea7bfc45293467eeb9"
+    },
+    {
+      "name": "PeerGrading-0.6.0-windows-arm64.exe",
+      "url": "https://github.com/010419she-commits/peergrading/releases/download/v0.6.0/PeerGrading-0.6.0-windows-arm64.exe",
+      "platform": "windows",
+      "arch": "arm64",
+      "size": 108652398,
+      "sha256": "899ed8ac36585dc946ca3b192ffcff6ff37575b4ac9231366cce8bb4ecf549a9"
+    },
+    {
+      "name": "PeerGrading-0.6.0-windows-x64.exe",
+      "url": "https://github.com/010419she-commits/peergrading/releases/download/v0.6.0/PeerGrading-0.6.0-windows-x64.exe",
+      "platform": "windows",
+      "arch": "x64",
+      "size": 114698010,
+      "sha256": "b8513d53956071480cf4d587486566c2dc01ed43d36ac7cd0ff4798a8ce1636f"
+    }
+  ]
 }
