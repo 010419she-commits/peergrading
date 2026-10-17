@@ -140,14 +140,15 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           output="release/${{ matrix.platform }}-${{ matrix.arch }}"
-          mapfile -t installers < <(find "$output" -maxdepth 1 -type f -name "*.${{ matrix.extension }}")
-          if [ "${#installers[@]}" -ne 1 ]; then
-            echo "Expected exactly one .${{ matrix.extension }} installer in $output, found ${#installers[@]}"
+          count=$(find "$output" -maxdepth 1 -type f -name "*.${{ matrix.extension }}" | wc -l | tr -d ' ')
+          if [ "$count" -ne 1 ]; then
+            echo "Expected exactly one .${{ matrix.extension }} installer in $output, found $count"
             exit 1
           fi
+          installer=$(find "$output" -maxdepth 1 -type f -name "*.${{ matrix.extension }}" | head -n 1)
           mkdir -p artifacts
           asset="PeerGrading-${version}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}"
-          cp "${installers[0]}" "artifacts/$asset"
+          cp "$installer" "artifacts/$asset"
       - uses: actions/upload-artifact@v4
         with:
           name: peergrading-${{ matrix.platform }}-${{ matrix.arch }}
@@ -168,9 +169,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t installers < <(find release-assets -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
-          if [ "${#installers[@]}" -ne 4 ]; then
-            echo "Expected four installers, found ${#installers[@]}"
+          count=$(find release-assets -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | wc -l | tr -d ' ')
+          if [ "$count" -ne 4 ]; then
+            echo "Expected four installers, found $count"
             exit 1
           fi
           (cd release-assets && sha256sum ./*.dmg ./*.exe > SHA256SUMS)
@@ -182,11 +183,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | sort)
+          assets=$(find release-assets -maxdepth 1 -type f | sort)
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${assets[@]}" --clobber
+            gh release upload "$tag" $assets --clobber
           else
-            gh release create "$tag" "${assets[@]}" \
+            gh release create "$tag" $assets \
               --title "PeerGrading ${tag#v}" \
               --notes "MIT open-source, local-first desktop release. Verify installers with SHA256SUMS. macOS signing and notarization are only applied when the corresponding build credentials are present; no unsigned or unnotarized asset is claimed to be signed or notarized."
           fi
