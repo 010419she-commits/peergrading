@@ -8,15 +8,21 @@ export interface RepositoryCheck { argv: string[]; timeoutMs?: number }
 export interface RepositoryConfig { path: string; sessionDir: string; checks?: RepositoryCheck[] }
 export interface RepositoryInspection { path: string; head: string; branch: string; dirty: boolean; commonDir: string }
 export interface RepositoryCheckResult {
-  n: number; argv: string[]; code: number | null; ok: boolean; timedOut: boolean; stdout: string; stderr: string; durationMs: number;
+  id: string; n: number; argv: string[]; code: number | null; ok: boolean; timedOut: boolean; stdout: string; stderr: string; durationMs: number;
+  startedAt: string; finishedAt: string; treeBefore: string; treeAfter: string; evidenceValid: boolean; evidenceError?: string;
+  stdoutTruncated?: boolean; stderrTruncated?: boolean;
 }
 export interface RepositorySnapshot {
-  n: number; agent: "A" | "B"; summary: string; commit: string; baseCommit: string; patchFile: string; stat: string; checks: RepositoryCheckResult[];
+  n: number; agent: "A" | "B"; summary: string; commit: string; tree: string; baseCommit: string; patchFile: string; stat: string; checks: RepositoryCheckResult[];
+}
+export interface RepositoryReview {
+  id: string; round: number; version: number; commit: string; reviewer: "A" | "B"; kind: "review" | "counter";
+  verdict: "approve" | "revise"; checkIds: string[]; createdAt: string;
 }
 export interface RepositoryManifest {
   sourcePath: string; worktreePath: string; branch: string; baseCommit: string; finalCommit: string;
   status: "running" | "approved" | "max_rounds" | "cancelled" | "failed";
-  createdAt: string; error?: string; snapshots: RepositorySnapshot[]; checks: RepositoryCheckResult[];
+  createdAt: string; error?: string; snapshots: RepositorySnapshot[]; checks: RepositoryCheckResult[]; reviews?: RepositoryReview[];
 }
 
 /** Resolve even a not-yet-created destination through existing symlinks (/var on macOS). */
@@ -114,33 +120,80 @@ export class RepositoryWorkspace {
     await this.verifyHead(signal);
     if ((await git(this.manifest.worktreePath, ["status", "--porcelain=v1", "--untracked-files=normal"], signal)).trim()) throw new Error("审查或讨论阶段意外修改了仓库；已停止并保留现场");
   }
+  /** Stage only the isolated task worktree. Git's tree covers tracked and new deliverables, excluding ignored caches. */
+  private async candidateTree(signal?: AbortSignal): Promise<string> {
+    await this.verifyHead(signal);
+    await git(this.manifest.worktreePath, ["add", "--all", "--", "."], signal);
+    return (await git(this.manifest.worktreePath, ["write-tree"], signal)).trim();
+  }
+  private invalidateChecks(checks: RepositoryCheckResult[], message: string) {
+    for (const check of checks) {
+      check.ok = false; check.evidenceValid = false; check.evidenceError = message;
+    }
+  }
   async runChecks(n: number, signal: AbortSignal, onCheck?: (check: RepositoryCheckResult) => void): Promise<RepositoryCheckResult[]> {
+    assertActive(signal);
     const results: RepositoryCheckResult[] = [];
+    if (!this.checks.length) return results;
+    const candidate = await this.candidateTree(signal);
     for (const c of this.checks) {
       assertActive(signal);
+      const treeBefore = await this.candidateTree(signal);
       const start = Date.now();
       let r;
-      try { r = await runRepositoryProcess(c.argv, this.manifest.worktreePath, { signal, timeoutMs: c.timeoutMs, maxOutput: 200_000 }); }
+      try { r = await runRepositoryProcess(c.argv, this.manifest.worktreePath, { signal, timeoutMs: c.timeoutMs, maxOutput: 200_000, outputMode: "tail" }); }
       catch (err: any) { if (signal.aborted) throw err; r = { code: null, timedOut: false, stdout: "", stderr: String(err?.message ?? err) }; }
-      const result: RepositoryCheckResult = { n, argv: c.argv, ...r, ok: r.code === 0 && !r.timedOut, durationMs: Date.now() - start };
-      results.push(result); this.manifest.checks.push(result); await this.save(); onCheck?.(result);
+      const finished = Date.now();
+      const treeAfter = await this.candidateTree(signal);
+      const result: RepositoryCheckResult = {
+        id: randomUUID(), n, argv: [...c.argv], ...r, ok: r.code === 0 && !r.timedOut, durationMs: finished - start,
+        startedAt: new Date(start).toISOString(), finishedAt: new Date(finished).toISOString(), treeBefore, treeAfter, evidenceValid: true,
+      };
+      results.push(result);
+      // A later command may rewrite files tested by an earlier command. No command in
+      // this batch then proves that the final deliverable tree passed the whole suite.
+      if (results.some((check) => !check.evidenceValid || check.treeBefore !== candidate || check.treeAfter !== candidate)) {
+        this.invalidateChecks(results, "Validation changed deliverable files; rerun all checks against the final tree.");
+      }
+      this.manifest.checks.push(result); await this.save(); onCheck?.(result);
     }
     return results;
   }
   async snapshot(n: number, agent: "A" | "B", summary: string, checks: RepositoryCheckResult[], signal: AbortSignal): Promise<RepositorySnapshot> {
     assertActive(signal); await this.verifyHead(signal);
     const cwd = this.manifest.worktreePath;
-    await git(cwd, ["add", "--all", "--", "."], signal);
+    if (checks.length !== this.checks.length || checks.some((check) => check.n !== n)) throw new Error("本轮校验记录不完整，不能创建已验证快照");
+    const candidate = await this.candidateTree(signal);
+    if (checks.some((check) => !check.evidenceValid || check.treeBefore !== candidate || check.treeAfter !== candidate)) {
+      this.invalidateChecks(checks, "Snapshot files differ from the validated tree; rerun all checks against this version.");
+    }
     // An empty checkpoint still represents an author's turn and has a stable revision to review.
     await git(cwd, ["-c", "user.name=PeerGrading", "-c", "user.email=agent@peergrading.local", "commit", "--allow-empty", "--no-gpg-sign", "-m", `PeerGrading version ${n} — Agent ${agent}`], signal);
     const commit = (await git(cwd, ["rev-parse", "HEAD"], signal)).trim();
+    const tree = (await git(cwd, ["rev-parse", `${commit}^{tree}`], signal)).trim();
+    if (tree !== candidate) this.invalidateChecks(checks, "The committed tree differs from the validation candidate.");
     const baseCommit = this.manifest.finalCommit;
     this.manifest.finalCommit = commit;
     const patchFile = `v${n}.patch`;
     await fs.writeFile(path.join(this.artifactDir, patchFile), await readRepositoryDiff(cwd, baseCommit, commit, signal), { mode: 0o600 });
     const stat = (await git(cwd, ["diff", "--no-ext-diff", "--no-textconv", "--stat", baseCommit, commit, "--"], signal)).trim();
-    const snapshot: RepositorySnapshot = { n, agent, summary, commit, baseCommit, patchFile, stat, checks };
+    const snapshot: RepositorySnapshot = { n, agent, summary, commit, tree, baseCommit, patchFile, stat, checks };
     this.manifest.snapshots.push(snapshot); await this.save(); return snapshot;
+  }
+  async recordReview(receipt: RepositoryReview, signal?: AbortSignal) {
+    await this.assertReadOnly(signal);
+    const snapshot = this.manifest.snapshots.at(-1);
+    if (!snapshot || receipt.version !== snapshot.n || receipt.commit !== snapshot.commit || receipt.commit !== this.manifest.finalCommit
+      || JSON.stringify(receipt.checkIds) !== JSON.stringify(snapshot.checks.map((check) => check.id))) throw new Error("审查结论与当前版本或校验证据不匹配");
+    if (!receipt.id || this.manifest.reviews?.some((review) => review.id === receipt.id)
+      || !Number.isSafeInteger(receipt.round) || receipt.round < 1 || !Number.isFinite(Date.parse(receipt.createdAt))
+      || !["A", "B"].includes(receipt.reviewer) || !["review", "counter"].includes(receipt.kind)
+      || !["approve", "revise"].includes(receipt.verdict)) throw new Error("审查结论记录无效");
+    if (receipt.verdict === "approve" && snapshot.checks.some((check) => !check.ok || !check.evidenceValid || check.treeBefore !== snapshot.tree || check.treeAfter !== snapshot.tree)) {
+      throw new Error("当前版本校验未通过或证据已失效，不能记录通过结论");
+    }
+    (this.manifest.reviews ??= []).push(structuredClone(receipt));
+    await this.save();
   }
   async close(status: RepositoryManifest["status"], error?: string) {
     this.manifest.status = status;

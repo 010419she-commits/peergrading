@@ -1,9 +1,13 @@
 // orchestrator.ts — 双 Agent「作者 / 审查者」轮换协作循环（后端无关）
-import type { AgentInfo, Backend, Lang, Turn } from "./agents/types.ts";
+import type { AgentInfo, Backend, ChatRequest, ChatResult, Lang, Turn } from "./agents/types.ts";
 import { createBackend } from "./agents/backends.ts";
 import { newMediaRun, processMedia, MEDIA_LIMITS, type MediaEvent, type MediaProvider, type MediaRecord, type MediaRun } from "./agents/media.ts";
 import { prepareRepository, readRepositoryDiff, type RepositoryConfig, type RepositoryManifest, type RepositorySnapshot, type RepositoryCheckResult } from "./repository/workspace.ts";
 import { assertActive } from "./repository/process.ts";
+import { randomUUID } from "node:crypto";
+import { parseReviewVerdict } from "./review-verdict.ts";
+import type { RepositoryReview } from "./repository/workspace.ts";
+import { canonicalJson, newAccelerationStats, sha256Text, type AccelerationOptions, type AccelerationStats } from "./acceleration.ts";
 
 export type AgentKey = "A" | "B";
 
@@ -24,12 +28,14 @@ export interface RunConfig {
   /** 协作中生成图片 / 视频：agent 用 ```image / ```video 围栏描述画面，由 provider 生成后存到 dir */
   media?: { provider: MediaProvider; dir: string; images: boolean; videos: boolean };
   repository?: RepositoryConfig;
+  acceleration?: AccelerationOptions;
 }
 
 export type Kind = "draft" | "review" | "reply" | "counter" | "revision";
+export type AssistStatus = { kind: "speculative_review"; phase: "started" | "adopted" | "fallback"; stats: AccelerationStats };
 
 export type Event =
-  | { type: "status"; text: string }
+  | { type: "status"; text: string; assist?: AssistStatus }
   | { type: "message_start"; id: string; agent: AgentKey; name: string; model: string; source: string; kind: Kind; round: number }
   | { type: "delta"; id: string; text: string }
   | { type: "progress"; id: string; phase: "reasoning" | "running"; chars?: number }
@@ -39,30 +45,23 @@ export type Event =
   | { type: "repository_ready"; repository: RepositoryManifest }
   | { type: "repository_snapshot"; snapshot: RepositorySnapshot }
   | { type: "repository_check"; check: RepositoryCheckResult }
+  | { type: "repository_review"; review: RepositoryReview }
   | { type: "relay_wait"; id: string; agent: AgentKey; name: string; requestId: string; mode: "manual" | "clipboard"; first: boolean; text: string }
   | { type: "relay_candidate"; id: string; requestId: string; text: string }
   | { type: "relay_done"; id: string; requestId: string }
-  | { type: "done"; reason: string; finalVersion: number }
+  | { type: "done"; reason: string; finalVersion: number; approved?: boolean; acceleration?: AccelerationStats }
   | { type: "error"; message: string };
 
 export type Emit = (ev: Event) => void;
 
 const DELIVERABLE_RE = /<deliverable>([\s\S]*?)<\/deliverable>/i;
-const APPROVE_MARKS = ["【结论】通过", "VERDICT: APPROVE"];
-const REVISE_MARKS = ["【结论】需修改", "VERDICT: REVISE"];
 
 function extractDeliverable(text: string): string {
   const m = text.match(DELIVERABLE_RE);
   return (m ? m[1] : text).trim();
 }
 
-function parseVerdict(text: string): "approve" | "revise" {
-  const up = text.toUpperCase();
-  const last = (marks: string[]) => Math.max(...marks.map((m) => up.lastIndexOf(m.toUpperCase())));
-  const a = last(APPROVE_MARKS), r = last(REVISE_MARKS);
-  if (a < 0 && r < 0) return "revise";
-  return a > r ? "approve" : "revise";
-}
+const parseVerdict = parseReviewVerdict;
 
 // ---------- 提示词（中 / 英） ----------
 
@@ -98,7 +97,7 @@ const P = {
     s_counter: (r: number, t: number, T: number, who: string) => `第 ${r} 轮讨论 ${t}/${T}：「${who}」继续讨论…`,
     s_approved2: (r: number, who: string, n: number) => `第 ${r} 轮讨论后：「${who}」认可第 ${n} 版，协作结束。`,
     s_revise: (r: number, who: string, n: number) => `第 ${r} 轮：「${who}」根据讨论修改，产出第 ${n} 版…`,
-    s_max: (m: number, n: number) => `已达到最大轮数（${m}），以第 ${n} 版作为最终成果。`,
+    s_max: (m: number, n: number) => `已达到最大审查轮数（${m}），第 ${n} 版尚未通过；成果已保留，待人工检查。`,
     mediaRule: (images: boolean, videos: boolean) => {
       const kinds = [images ? "图片" : "", videos ? "视频" : ""].filter(Boolean).join("或");
       const lines = [`6. 成果需要${kinds}时，不要写"此处应有图"，而是用围栏请求生成，系统会自动生成并把围栏替换成 ![描述](media://…) 引用，另一位智能体与用户都能看到。`];
@@ -139,7 +138,7 @@ const P = {
     s_counter: (r: number, t: number, T: number, who: string) => `Round ${r} discussion ${t}/${T}: "${who}" continues the discussion…`,
     s_approved2: (r: number, who: string, n: number) => `Round ${r}: after discussion, "${who}" approved version ${n}. Done.`,
     s_revise: (r: number, who: string, n: number) => `Round ${r}: "${who}" revises based on the discussion → version ${n}…`,
-    s_max: (m: number, n: number) => `Reached the maximum of ${m} rounds; version ${n} is the final deliverable.`,
+    s_max: (m: number, n: number) => `Reached ${m} review rounds; version ${n} has not been approved. The deliverable is retained for inspection.`,
     mediaRule: (images: boolean, videos: boolean) => {
       const kinds = [images ? "an image" : "", videos ? "a video" : ""].filter(Boolean).join(" or ");
       const lines = [`6. When the deliverable needs ${kinds}, do not write "image goes here": request it with a fenced block. The system generates it and replaces the block with an ![description](media://…) reference that the other agent and the user can see.`];
@@ -150,6 +149,29 @@ const P = {
     },
   },
 };
+
+type CandidateOutcome = { ok: true; result: ChatResult; deltas: string[] } | { ok: false; error: unknown };
+type ReviewCandidate = {
+  producer: Agent;
+  reviewer: Agent;
+  content: string;
+  contentHash: string;
+  reviewerHistory: string;
+  controller: AbortController;
+  startedAt: number;
+  settledAt?: number;
+  promise: Promise<CandidateOutcome>;
+  outcome?: CandidateOutcome;
+  adopted: boolean;
+  fallback: boolean;
+};
+type SayOptions = {
+  onStream?: (text: string) => void;
+  candidate?: ReviewCandidate;
+  onCandidateFallback?: (candidate: ReviewCandidate) => void;
+  onCandidateAdopted?: (candidate: ReviewCandidate) => void;
+};
+type AgentAcceleration = { cache: boolean; cacheHit: () => void };
 
 class Agent {
   key: AgentKey;
@@ -163,15 +185,54 @@ class Agent {
   private lang: Lang;
   private cwd: string;
   private media: MediaRun | null;
+  private acceleration?: AgentAcceleration;
 
-  constructor(key: AgentKey, cfg: AgentConfig, system: string, emit: Emit, signal: AbortSignal, lang: Lang, cwd: string, backend?: Backend, media: MediaRun | null = null) {
-    this.key = key; this.cfg = cfg; this.system = system; this.emit = emit; this.signal = signal; this.lang = lang; this.cwd = cwd; this.media = media;
+  constructor(key: AgentKey, cfg: AgentConfig, system: string, emit: Emit, signal: AbortSignal, lang: Lang, cwd: string, backend?: Backend, media: MediaRun | null = null, acceleration?: AgentAcceleration) {
+    this.key = key; this.cfg = cfg; this.system = system; this.emit = emit; this.signal = signal; this.lang = lang; this.cwd = cwd; this.media = media; this.acceleration = acceleration;
     this.backend = backend ?? createBackend(cfg.agent.runner, {
       emit: (ev) => this.emit({ ...ev, id: this.currentId, agent: this.key, name: this.cfg.name }),
     });
   }
 
-  async say(kind: Kind, round: number, userText: string, repositoryAccess?: "read-only" | "write", forceRevision = false): Promise<string> {
+  private request(turns: Turn[], signal: AbortSignal, onDelta: (text: string) => void, onProgress?: ChatRequest["onProgress"], repositoryAccess?: "read-only" | "write") {
+    return this.backend.chat({
+      system: this.system, turns, lang: this.lang, cwd: this.cwd, signal, repositoryAccess,
+      ...(this.acceleration?.cache ? { cache: true } : {}), onDelta, onProgress,
+    });
+  }
+
+  startSpeculativeReview(producer: Agent, userText: string, content: string): ReviewCandidate {
+    const controller = new AbortController();
+    const candidateSignal = AbortSignal.any([this.signal, controller.signal]);
+    const turns = structuredClone([...this.turns, { role: "user", text: userText }]);
+    const deltas: string[] = [];
+    let candidate!: ReviewCandidate;
+    candidate = {
+      producer, reviewer: this, content, contentHash: sha256Text(content), reviewerHistory: canonicalJson(this.turns),
+      controller, startedAt: Date.now(), adopted: false, fallback: false,
+      promise: undefined as unknown as Promise<CandidateOutcome>,
+    };
+    candidate.promise = (async (): Promise<CandidateOutcome> => {
+      try {
+        const result = await this.request(turns, candidateSignal, (text) => { deltas.push(text); });
+        assertActive(this.signal);
+        if (result.cacheHit) this.acceleration?.cacheHit();
+        candidate.outcome = { ok: true, result, deltas };
+      } catch (error) {
+        candidate.outcome = { ok: false, error };
+      } finally {
+        candidate.settledAt = Date.now();
+      }
+      return candidate.outcome!;
+    })();
+    return candidate;
+  }
+
+  historyFingerprint(): string {
+    return canonicalJson(this.turns);
+  }
+
+  async say(kind: Kind, round: number, userText: string, repositoryAccess?: "read-only" | "write", forceRevision = false, options: SayOptions = {}): Promise<string> {
     assertActive(this.signal);
     this.turns.push({ role: "user", text: userText });
     const id = `${this.key}-${round}-${kind}-${Date.now()}`;
@@ -179,11 +240,31 @@ class Agent {
     const m = this.cfg.agent.model; const modelLabel = typeof m === "string" ? m : m[this.lang];
     const ttl = this.cfg.agent.title; const source = typeof ttl === "string" ? ttl : ttl[this.lang];
     this.emit({ type: "message_start", id, agent: this.key, name: this.cfg.name, model: modelLabel, source, kind, round });
-    const res = await this.backend.chat({
-      system: this.system, turns: this.turns, lang: this.lang, cwd: this.cwd, signal: this.signal, repositoryAccess,
-      onDelta: (text) => this.emit({ type: "delta", id, text }),
-      onProgress: (p) => this.emit({ type: "progress", id, ...p }),
-    });
+    let streamed = "";
+    let res: ChatResult;
+    let usedCandidate = false;
+    if (options.candidate) {
+      const outcome = await options.candidate.promise;
+      assertActive(this.signal);
+      if (outcome.ok) {
+        usedCandidate = true;
+        res = outcome.result;
+        for (const delta of outcome.deltas) {
+          assertActive(this.signal);
+          this.emit({ type: "delta", id, text: delta });
+        }
+      } else {
+        options.onCandidateFallback?.(options.candidate);
+        res = await this.request(this.turns, this.signal, (text) => this.emit({ type: "delta", id, text }), (p) => this.emit({ type: "progress", id, ...p }), repositoryAccess);
+      }
+    } else {
+      res = await this.request(this.turns, this.signal, (text) => {
+        streamed += text;
+        this.emit({ type: "delta", id, text });
+        options.onStream?.(streamed);
+      }, (p) => this.emit({ type: "progress", id, ...p }), repositoryAccess);
+    }
+    if (!usedCandidate && res.cacheHit) this.acceleration?.cacheHit();
     assertActive(this.signal);
     // 媒体围栏 → 生成 → 替换为引用；替换后的正文进入双方后续对话与成果
     let text = res.text;
@@ -191,9 +272,15 @@ class Agent {
       try { text = await processMedia(res.text, this.media, id, (ev) => this.emit(ev)); }
       catch (e: any) { if (this.signal.aborted) throw e; this.emit({ type: "status", text: String(e?.message ?? e) }); }
     }
-    this.turns.push({ role: "assistant", text });
+    // Protocol continuation stays in this Agent's in-memory history. It is not
+    // emitted, persisted in the session, or shared with the other reviewer.
+    this.turns.push({ role: "assistant", text, ...(res.apiMessage ? { apiMessage: structuredClone(res.apiMessage) } : {}) });
     const verdict = kind === "review" || kind === "counter" ? (forceRevision ? "revise" : parseVerdict(text)) : undefined;
     this.emit({ type: "message_end", id, verdict, model: res.model, usage: res.usage, ...(text !== res.text ? { text } : {}) });
+    if (usedCandidate) {
+      options.candidate!.adopted = true;
+      options.onCandidateAdopted?.(options.candidate!);
+    }
     return text;
   }
 }
@@ -205,6 +292,7 @@ export interface RunResult {
   approved: boolean;   // 最终版是否经审查者判定「通过」（false = 达到最大轮数）
   media: MediaRecord[];   // 本次协作生成的图片 / 视频
   repository?: RepositoryManifest;
+  acceleration?: AccelerationStats;
 }
 
 export async function runCollaboration(
@@ -217,8 +305,64 @@ export async function runCollaboration(
   const m = cfg.media && (cfg.media.images || cfg.media.videos) ? cfg.media : null;
   const mediaRun = m ? newMediaRun(m.provider, m.dir, cfg.lang, signal, { images: m.images, videos: m.videos }) : null;
   const rule = m ? T.mediaRule(m.images, m.videos) : "";
-  const A = new Agent("A", cfg.agentA, T.system(cfg.agentA.name, cfg.agentB.name, cfg.agentA.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.A, mediaRun);
-  const B = new Agent("B", cfg.agentB, T.system(cfg.agentB.name, cfg.agentA.name, cfg.agentB.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.B, mediaRun);
+  const stats = cfg.acceleration ? newAccelerationStats() : undefined;
+  const acceleration = { cache: cfg.acceleration?.cache === true, cacheHit: () => { if (stats) stats.cacheHits++; } };
+  const A = new Agent("A", cfg.agentA, T.system(cfg.agentA.name, cfg.agentB.name, cfg.agentA.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.A, mediaRun, acceleration);
+  const B = new Agent("B", cfg.agentB, T.system(cfg.agentB.name, cfg.agentA.name, cfg.agentB.persona, cfg.task, rule), emit, signal, cfg.lang, cfg.cwd, backends?.B, mediaRun, acceleration);
+
+  const emitAssist = (phase: AssistStatus["phase"]) => {
+    const text = cfg.lang === "zh"
+      ? phase === "started" ? "云端预审已与作者后续输出并行启动。" : phase === "adopted" ? "已采纳与当前成果一致的预审结果。" : "预审结果不可用，已回到正式审查。"
+      : phase === "started" ? "Cloud pre-review is running alongside the author's remaining output." : phase === "adopted" ? "Adopted the pre-review matching the current deliverable." : "Pre-review unavailable; falling back to the formal review.";
+    emit({ type: "status", text, assist: { kind: "speculative_review", phase, stats: { ...stats! } } });
+  };
+  const fallback = (candidate: ReviewCandidate) => {
+    if (candidate.fallback || candidate.adopted) return;
+    candidate.fallback = true;
+    candidate.controller.abort();
+    if (stats) stats.fallbacks++;
+    emitAssist("fallback");
+  };
+  const adopted = (candidate: ReviewCandidate) => {
+    if (stats) stats.adopted++;
+    emitAssist("adopted");
+  };
+  const contentMatches = (candidate: ReviewCandidate, content: string) => candidate.content === content && candidate.contentHash === sha256Text(content);
+  const canSpeculate = (producer: Agent, nextReviewer: Agent) => Boolean(
+    cfg.acceleration?.speculativeReview && !mediaRun
+    && producer.cfg.agent.deployment === "local" && nextReviewer.cfg.agent.deployment === "cloud"
+    && producer.cfg.agent.runner.type === "openai" && nextReviewer.cfg.agent.runner.type === "openai"
+  );
+  const produce = async (producer: Agent, nextReviewer: Agent, kind: "draft" | "revision", round: number, prompt: string, n: number) => {
+    let candidate: ReviewCandidate | undefined;
+    const onStream = canSpeculate(producer, nextReviewer) ? (text: string) => {
+      if (candidate || !DELIVERABLE_RE.test(text)) return;
+      const content = extractDeliverable(text);
+      candidate = nextReviewer.startSpeculativeReview(producer, T.review(producer.cfg.name, n, content), content);
+      if (stats) stats.started++;
+      emitAssist("started");
+    } : undefined;
+    try {
+      const text = await producer.say(kind, round, prompt, undefined, false, { onStream });
+      if (candidate && stats) {
+        const finishedAt = Date.now();
+        stats.overlapMs += Math.max(0, Math.min(candidate.settledAt ?? finishedAt, finishedAt) - candidate.startedAt);
+      }
+      return { text, candidate };
+    } catch (error) {
+      if (candidate) {
+        candidate.controller.abort();
+        if (!signal.aborted) fallback(candidate);
+      }
+      throw error;
+    }
+  };
+  const validatedCandidate = (candidate: ReviewCandidate | undefined, producer: Agent, nextReviewer: Agent, content: string) => {
+    if (!candidate) return undefined;
+    if (candidate.producer === producer && candidate.reviewer === nextReviewer && contentMatches(candidate, content)) return candidate;
+    fallback(candidate);
+    return undefined;
+  };
 
   const versions: RunResult["versions"] = [];
   const pushVersion = (agent: Agent, content: string) => {
@@ -229,14 +373,23 @@ export async function runCollaboration(
   };
 
   emit({ type: "status", text: T.s_draft(A.cfg.name) });
-  const draft = await A.say("draft", 0, T.draft());
-  let current = pushVersion(A, extractDeliverable(draft));
+  const draft = await produce(A, B, "draft", 0, T.draft(), 1);
+  let current = pushVersion(A, extractDeliverable(draft.text));
+  let candidateForReview = validatedCandidate(draft.candidate, A, B, current.content);
 
   let author = A, reviewer = B, reason = "", approved = false;
 
   for (let round = 1; round <= cfg.maxRounds; round++) {
     emit({ type: "status", text: T.s_review(round, reviewer.cfg.name, current.n) });
-    const review = await reviewer.say("review", round, T.review(author.cfg.name, current.n, current.content));
+    let candidate = candidateForReview;
+    candidateForReview = undefined;
+    if (candidate && (candidate.reviewerHistory !== reviewer.historyFingerprint() || candidate.producer !== author || candidate.reviewer !== reviewer || !contentMatches(candidate, current.content))) {
+      fallback(candidate);
+      candidate = undefined;
+    }
+    const review = await reviewer.say("review", round, T.review(author.cfg.name, current.n, current.content), undefined, false, candidate ? {
+      candidate, onCandidateFallback: fallback, onCandidateAdopted: adopted,
+    } : {});
     let verdict = parseVerdict(review);
     if (verdict === "approve") {
       reason = T.s_approved(round, reviewer.cfg.name, current.n); approved = true;
@@ -260,18 +413,24 @@ export async function runCollaboration(
       break;
     }
 
+    if (round === cfg.maxRounds) break;
     emit({ type: "status", text: T.s_revise(round, reviewer.cfg.name, current.n + 1) });
-    const revision = await reviewer.say("revision", round, T.revision(author.cfg.name, lastAuthorMsg, current.n + 1));
-    current = pushVersion(reviewer, extractDeliverable(revision));
+    const revision = await produce(reviewer, author, "revision", round, T.revision(author.cfg.name, lastAuthorMsg, current.n + 1), current.n + 1);
+    current = pushVersion(reviewer, extractDeliverable(revision.text));
+    candidateForReview = validatedCandidate(revision.candidate, reviewer, author, current.content);
     [author, reviewer] = [reviewer, author];
   }
 
+  if (candidateForReview) {
+    fallback(candidateForReview);
+    candidateForReview = undefined;
+  }
   if (!reason) {
     reason = T.s_max(cfg.maxRounds, current.n);
     emit({ type: "status", text: reason });
   }
-  emit({ type: "done", reason, finalVersion: current.n });
-  return { versions, finalVersion: current.n, reason, approved, media: mediaRun?.records ?? [] };
+  emit({ type: "done", reason, finalVersion: current.n, approved, ...(stats ? { acceleration: { ...stats } } : {}) });
+  return { versions, finalVersion: current.n, reason, approved, media: mediaRun?.records ?? [], ...(stats ? { acceleration: { ...stats } } : {}) };
 }
 
 /** Repository mode shares a task worktree and hands write access to one author at a time. */
@@ -325,6 +484,16 @@ async function runRepositoryCollaboration(cfg: RunConfig, emit: Emit, signal: Ab
     const answer = await agent.say(kind, round, prompt, "read-only", forceRevision);
     await workspace.assertReadOnly(signal); return answer;
   };
+  const saveReview = async (snapshot: RepositorySnapshot, agent: Agent, kind: "review" | "counter", round: number, text: string) => {
+    const verdict = snapshot.checks.some((check) => !check.ok || check.evidenceValid === false) ? "revise" : parseVerdict(text);
+    const review: RepositoryReview = {
+      id: randomUUID(), round, version: snapshot.n, commit: snapshot.commit, reviewer: agent.key, kind, verdict,
+      checkIds: snapshot.checks.map((check) => check.id), createdAt: new Date().toISOString(),
+    };
+    await workspace.recordReview(review, signal);
+    emit({ type: "repository_review", review });
+    return verdict;
+  };
   try {
     emit({ type: "repository_ready", repository: structuredClone(manifest) });
     emit({ type: "status", text: zh ? `任务分支 ${manifest.branch} 已创建；两位 Agent 将轮流在隔离目录中修改文件。` : `Task branch ${manifest.branch} created; the agents will edit the isolated worktree in turn.` });
@@ -347,15 +516,14 @@ async function runRepositoryCollaboration(cfg: RunConfig, emit: Emit, signal: Ab
         ? `请只读审查实际文件和第 ${current.n} 版改动。基线 ${manifest.baseCommit}，当前提交 ${current.commit}。\n作者摘要：\n${current.summary}\n\n本轮变更：\n${current.stat}\n\n${diffContext}\n\n程序校验结果：\n${report}\n\n核对用户任务，指出具体问题，给出通过或需修改结论。`
         : `Read-only review of the actual files and version ${current.n}. Base ${manifest.baseCommit}; current commit ${current.commit}.\nAuthor summary:\n${current.summary}\n\nChanges:\n${current.stat}\n\n${diffContext}\n\nValidation results:\n${report}\n\nCheck against the user task and give an explicit verdict.`;
       let review = await readOnly(reviewer, "review", round, reviewPrompt, failures);
-      let verdict = parseVerdict(review);
-      if (failures) verdict = "revise";
+      let verdict = await saveReview(current, reviewer, "review", round, review);
       if (verdict === "approve") { approved = true; reason = T.s_approved(round, reviewer.cfg.name, current.n); break; }
       let reply = "";
       for (let turn = 1; turn <= cfg.discussionTurns; turn++) {
         reply = await readOnly(author, "reply", round, `${T.reply(reviewer.cfg.name, current.n, review)}\n${failures ? (zh ? "校验仍失败，当前版本不能通过。" : "Validation still fails; the current version cannot be approved.") : ""}`);
         if (turn < cfg.discussionTurns) {
           review = await readOnly(reviewer, "counter", round, T.counter(author.cfg.name, reply), failures);
-          if (!failures && parseVerdict(review) === "approve") { approved = true; reason = T.s_approved2(round, reviewer.cfg.name, current.n); break; }
+          if (await saveReview(current, reviewer, "counter", round, review) === "approve") { approved = true; reason = T.s_approved2(round, reviewer.cfg.name, current.n); break; }
         }
       }
       if (approved || round === cfg.maxRounds) break;
@@ -369,7 +537,7 @@ async function runRepositoryCollaboration(cfg: RunConfig, emit: Emit, signal: Ab
     if (!reason) reason = zh ? `已达到最大审查轮数（${cfg.maxRounds}），第 ${current.n} 版尚未通过。改动保留在任务分支，待人工检查。` : `Reached ${cfg.maxRounds} review rounds; version ${current.n} has not passed. Changes remain on the task branch for inspection.`;
     assertActive(signal);
     await workspace.close(approved ? "approved" : "max_rounds");
-    emit({ type: "status", text: reason }); emit({ type: "done", reason, finalVersion: current.n });
+    emit({ type: "status", text: reason }); emit({ type: "done", reason, finalVersion: current.n, approved });
     return { versions, finalVersion: current.n, reason, approved, media: [], repository: manifest };
   } catch (e: any) {
     await workspace.close(signal.aborted ? "cancelled" : "failed", String(e?.message ?? e));

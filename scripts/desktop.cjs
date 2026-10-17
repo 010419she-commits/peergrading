@@ -8,10 +8,6 @@ const env = { ...process.env };
 for (const key of Object.keys(env)) {
   if (key.toUpperCase() === "ELECTRON_RUN_AS_NODE") delete env[key];
 }
-if (args[0] === "--local-cloud") {
-  args.shift();
-  env.CLOUD_URL = "http://localhost:3001";
-}
 const child = spawn(electron, [path.resolve(__dirname, ".."), ...args], {
   env, stdio: "inherit", shell: false,
 });

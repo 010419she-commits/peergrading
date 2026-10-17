@@ -4,45 +4,33 @@ const t = (k) => window.I18N[lang][k];
 const IS_WIN = /Windows/i.test(navigator.userAgent);   // 粘贴快捷键提示用
 
 let agents = [];
-let csrf = "", me = null;
+let initialAgentSelection = true;
+let localModelConnections = [], localModelsAvailable = false, editingLocalModel = null, localModelsBusy = false, localModelMessage = null;
+let apiModelConnections = [], apiPresets = [], apiModelsAvailable = false, editingApiModel = null, apiModelsBusy = false, apiModelMessage = null;
+let csrf = "", localMode = false, repositoryAvailable = false;
 const _fetch = window.fetch.bind(window);
 window.fetch = (url, opts = {}) => {
-  if (opts.method && opts.method !== "GET") opts.headers = { ...(opts.headers || {}), "x-csrf-token": csrf };
-  return _fetch(url, opts).then((r) => { if (r.status === 401 && String(url).startsWith("/api/")) location.assign(localMode ? "/account" : "/?login=required"); return r; });
+  if ((opts.method || "GET").toUpperCase() !== "GET") opts.headers = { ...(opts.headers || {}), "x-csrf-token": csrf };
+  return _fetch(url, opts);
 };
-let localMode = false, cloudUrl = "";
-async function bootstrapAuth() {
-  const r = await _fetch("/api/auth/bootstrap"); const d = await r.json();
-  csrf = d.csrf; me = d.user; localMode = !!d.localMode; cloudUrl = d.cloudUrl || "";
-  if (!me) { location.assign(localMode ? "/account" : "/?login=required"); return false; }
-  if (localMode) {
-    for (const link of document.querySelectorAll('.titlebar a[href="/account"], #paywall a')) {
-      link.href = "/account" + (link.closest("#paywall") ? "#pricing" : "");
-      link.onclick = (event) => { if (window.peergrading?.openAccount) { event.preventDefault(); window.peergrading.openAccount(link.hash); } };
-    }
-    const lo = $("#logout-btn"); if (lo) { lo.onclick = async () => { if (!confirm(t("unpairConfirm"))) return; await fetch("/api/local/auth/logout", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); location.assign("/account"); }; }
-  }
-  renderAccess(); return true;
+function applyRepositoryAvailability() {
+  $("#work-mode option[value=repository]").disabled = !repositoryAvailable;
+  $("#repository-browse").hidden = !repositoryAvailable || !window.peergrading?.chooseRepository;
 }
-function renderAccess() {
-  const b = $("#access-badge"); if (!b || !me) return;
-  const a = me.access;
-  b.className = "access" + (a.member ? " member" : "");
-  b.textContent = a.member ? t("memberBadge") : a.beta ? t("betaBadge") : t("trialBadge")(a.trial.daysLeft, a.trial.usesLeft);
+async function bootstrap() {
+  const r = await _fetch("/api/bootstrap", { headers: { accept: "application/json" } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || typeof d.csrf !== "string" || typeof d.localMode !== "boolean" || typeof d.repositoryAvailable !== "boolean") throw new Error("bootstrap_failed");
+  csrf = d.csrf; localMode = d.localMode; repositoryAvailable = d.repositoryAvailable;
+  document.body.dataset.localMode = String(localMode);
+  applyRepositoryAvailability();
 }
-function showPaywall(access) {
-  const p = $("#paywall"); if (!p) return;
-  $("#paywall-text").textContent = access?.reason === "trial_expired" ? t("paywallExpired") : t("paywallExhausted");
-  p.classList.add("open");
-}
-$("#close-paywall") && ($("#close-paywall").onclick = () => $("#paywall").classList.remove("open"));
-$("#logout-btn") && ($("#logout-btn").onclick = async () => { await fetch("/auth/logout", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); location.assign("/"); });
 const chosen = { A: null, B: null };
 let pickingSlot = null;
 let runId = null, controller = null;
 const msgs = new Map();
 const versions = [];
-let repositoryRun = false, repositoryManifest = null, diffRequest = 0;
+let repositoryRun = false, repositoryManifest = null, diffRequest = 0, replayStatus = null;
 
 marked.setOptions({ breaks: true });
 /** 协作中生成的图片 / 视频以 media://文件名 引用，渲染时指向当前会话的媒体接口。在渲染器层做映射，代码块 / 行内代码里的引用原样保留 */
@@ -77,7 +65,7 @@ function applyI18n() {
   $("#history").options[0] && ($("#history").options[0].textContent = t("historyPh"));
   if (!msgs.size) $("#timeline").innerHTML = `<p class="sys">${esc(t("timelineEmpty"))}</p>`;
   if (!versions.length) $("#version-body").innerHTML = `<p class="sys">${esc(t("versionsEmpty"))}</p>`;
-  renderSlot("A"); renderSlot("B"); renderCards(); renderRepository();
+  renderSlot("A"); renderSlot("B"); renderCards(); renderRepository(); renderLocalModels(); renderApiModels(); renderAssistPhase(); renderAssistMetrics();
 }
 $("#lang-seg").onclick = (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -89,18 +77,27 @@ $("#lang-seg").onclick = (e) => {
 /* ---------- 智能体检测与选择 ---------- */
 async function loadAgents(refresh = false) {
   $("#cards").innerHTML = `<p class="sys">${esc(t("detecting"))}</p>`;
-  const r = await fetch("/api/agents" + (refresh ? "?refresh=1" : ""));
-  agents = (await r.json()).agents;
+  let data;
+  try {
+    const r = await fetch("/api/agents" + (refresh ? "?refresh=1" : ""));
+    data = await r.json();
+    if (!r.ok || !Array.isArray(data.agents)) throw new Error("agent_detection_failed");
+  } catch (error) {
+    $("#cards").innerHTML = `<p class="sys err">${esc(t("detectFailed"))}</p>`;
+    throw error;
+  }
+  agents = data.agents;
   // 若已选的智能体状态变化，同步
-  for (const k of ["A", "B"]) if (chosen[k]) chosen[k] = agents.find((a) => a.id === chosen[k].id) || chosen[k];
-  // 默认：A 选第一个可用的云端，B 选第一个可用的本地；否则前两个
-  if (!chosen.A && !chosen.B) {
+  for (const k of ["A", "B"]) if (chosen[k]) chosen[k] = agents.find((a) => a.id === chosen[k].id) || null;
+  // 仅首次进入时自动选择；重新识别或保存连接不会替用户选择其他智能体。
+  if (initialAgentSelection && !chosen.A && !chosen.B) {
     const ready = agents.filter((a) => a.status === "ready" || a.status === "unverified");
     const autos = ready.filter((a) => a.auto);
     chosen.A = autos[0] || ready[0] || null;
     chosen.B = autos.find((a) => a !== chosen.A) || ready.find((a) => a !== chosen.A) || null;
     for (const k of ["A", "B"]) if (chosen[k]?.runner?.app) $("#app-" + k).value = chosen[k].runner.app;
   }
+  initialAgentSelection = false;
   renderSlot("A"); renderSlot("B"); renderCards();
 }
 function statusLabel(a) { return t("st_" + a.status); }
@@ -108,17 +105,17 @@ function renderSlot(k) {
   const el = $("#pick-" + k), a = chosen[k];
   el.classList.toggle("filled", Boolean(a));
   el.innerHTML = a
-    ? `<div class="ic">${esc(a.icon)}</div><div class="txt"><div class="t">${esc(tx(a.title))} ${a.auto ? `<span class="badge auto">${t("autoBadge")}</span>` : `<span class="badge manual">${t("manualBadge")}</span>`}</div><div class="m"><span class="dot ${a.status}"></span>${esc(statusLabel(a))} · ${esc(tx(a.subtitle))}</div></div><span class="chg">${esc(t("change"))}</span>`
+    ? `<div class="ic">${esc(a.icon)}</div><div class="txt"><div class="t">${esc(tx(a.title))} ${a.auto ? `<span class="badge auto">${t("autoBadge")}</span>` : `<span class="badge manual">${t("manualBadge")}</span>`}</div><div class="m"><span class="dot ${a.status}"></span>${esc(statusLabel(a))} · ${esc(tx(a.subtitle))}</div>${a.model ? `<div class="agent-model">${esc(t("modelLabel"))}: ${esc(tx(a.model))}</div>` : ""}</div><span class="chg">${esc(t("change"))}</span>`
     : `<div class="ic">?</div><div class="txt"><div class="t">${esc(t("choose"))}</div></div>`;
   el.onclick = () => openSheet(k);
   $("#effort-row-" + k).hidden = !(a && a.runner?.type === "anthropic");
   $("#app-row-" + k).hidden = !(a && a.kind === "relay");
 }
-function openSheet(k) { pickingSlot = k; $("#sheet").classList.add("open"); renderCards(); }
-function closeSheet() { $("#sheet").classList.remove("open"); pickingSlot = null; }
+function openSheet(k) { pickingSlot = k; $("#sheet").classList.add("open"); renderCards(); loadLocalModels(); loadApiModels(); }
+function closeSheet() { $("#sheet").classList.remove("open"); pickingSlot = null; $("#api-model-key").value = ""; }
 $("#close-sheet").onclick = closeSheet;
 $("#sheet").onclick = (e) => { if (e.target === $("#sheet")) closeSheet(); };
-$("#refresh").onclick = () => loadAgents(true);
+$("#refresh").onclick = () => { loadAgents(true).catch(() => {}); loadLocalModels(); loadApiModels(); };
 
 function renderCards() {
   const box = $("#cards");
@@ -140,7 +137,7 @@ function renderCards() {
     const netBadge = (a.auto ? `<span class="badge auto">${t("autoBadge")}</span>` : `<span class="badge manual">${t("manualBadge")}</span>`) + (a.kind === "relay" && !a.runner?.app ? "" : `<span class="badge ${a.local ? "local" : "cloud"}">${t(a.local ? "local" : "cloud")}</span>`);
     card.innerHTML = `<div class="ic">${esc(a.icon)}</div>
       <div><div class="t">${esc(tx(a.title))} ${netBadge}<span class="badge"><span class="dot ${a.status}"></span>${esc(statusLabel(a))}</span></div>
-      <div class="m">${esc(tx(a.subtitle))}</div>${detail}</div>
+      <div class="m">${esc(tx(a.subtitle))}</div>${a.model ? `<div class="agent-model">${esc(t("modelLabel"))}: ${esc(tx(a.model))}</div>` : ""}${detail}</div>
       <div class="side">${side}</div>`;
     card.onclick = (e) => {
       const b = e.target.closest("button");
@@ -155,6 +152,224 @@ function renderCards() {
     box.appendChild(card);
   }
 }
+
+/* ---------- 云端 API 连接 ---------- */
+function apiModelErrorKey(code) {
+  return ({ invalid_api_model_connection: "apiModelInvalid", api_model_key_required: "apiModelKeyRequired", api_model_endpoint_private: "apiModelPrivate", api_model_endpoint_unavailable: "apiModelUnavailable", api_models_limit: "localModelLimit", api_model_not_found: "localModelNotFound", invalid_api_models_store: "apiModelStoreError", api_models_local_only: "apiModelsLocalOnly" })[code] || "apiModelRequestFailed";
+}
+function showApiModelMessage(key, error = false) {
+  apiModelMessage = { key, error };
+  $("#api-model-message").textContent = t(key);
+  $("#api-model-message").classList.toggle("error", error);
+}
+function apiPreset() { return apiPresets.find((preset) => preset.id === $("#api-model-provider").value); }
+function updateApiModelHints() {
+  const preset = apiPreset(), existing = apiModelConnections.find((connection) => connection.id === editingApiModel);
+  const canonical = (value) => { try { return new URL(value.trim()).href.replace(/\/+$/, ""); } catch { return value; } };
+  const keep = existing && existing.provider === preset?.id && canonical(existing.baseUrl) === canonical($("#api-model-base").value);
+  $("#api-model-key").required = !keep;
+  $("#api-model-key").placeholder = t(keep ? "apiModelKeyKeep" : "apiModelKeyPh");
+  $("#api-model-model-hint").textContent = preset?.modelHint ? tx(preset.modelHint) : t("apiModelModelHint");
+  for (const [id, value] of [["#api-model-key-link", preset?.keyUrl], ["#api-model-docs-link", preset?.docsUrl]]) {
+    const link = $(id); link.hidden = !value; if (value) link.href = value; else link.removeAttribute("href");
+  }
+}
+function resetApiModelForm(connection = null) {
+  editingApiModel = connection?.id || null;
+  const preset = apiPresets.find((entry) => entry.id === connection?.provider) || apiPresets.find((entry) => entry.id === "kimi") || apiPresets[0];
+  $("#api-model-provider").value = preset?.id || "";
+  $("#api-model-name").value = connection?.name || (preset ? tx(preset.name) + " API" : "");
+  $("#api-model-base").value = connection?.baseUrl || preset?.baseUrl || "";
+  $("#api-model-model").value = connection?.model || preset?.model || "";
+  $("#api-model-key").value = "";
+  renderApiModels();
+}
+function renderApiModels() {
+  $("#api-models").hidden = !apiModelsAvailable;
+  $("#manage-api-models").hidden = !apiModelsAvailable;
+  if (!apiModelsAvailable) return;
+  const provider = $("#api-model-provider"), previous = provider.value;
+  provider.innerHTML = apiPresets.map((preset) => `<option value="${esc(preset.id)}">${esc(tx(preset.name))}</option>`).join("");
+  provider.value = apiPresets.some((entry) => entry.id === previous) ? previous : apiPresets[0]?.id || "";
+  const list = $("#api-model-list"); list.replaceChildren();
+  if (!apiModelConnections.length) { const note = document.createElement("p"); note.className = "hint"; note.textContent = t("apiModelsEmpty"); list.append(note); }
+  for (const connection of apiModelConnections) {
+    const row = document.createElement("div"), info = document.createElement("div"), name = document.createElement("strong"), address = document.createElement("div"), model = document.createElement("div"), buttons = document.createElement("div");
+    row.className = "local-model-connection"; buttons.className = "local-model-controls";
+    name.textContent = connection.name; address.className = model.className = "hint"; address.textContent = connection.baseUrl;
+    model.textContent = `${t("modelLabel")}: ${connection.model} · ${t("localModelKeySaved")}`;
+    for (const action of ["edit", "delete"]) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "btn sm"; button.disabled = apiModelsBusy;
+      button.textContent = t(action === "edit" ? "localModelEdit" : "localModelDelete");
+      button.onclick = action === "edit" ? () => resetApiModelForm(connection) : () => deleteApiModel(connection); buttons.append(button);
+    }
+    info.append(name, address, model); row.append(info, buttons); list.append(row);
+  }
+  $("#api-model-form-title").textContent = t(editingApiModel ? "apiModelEditTitle" : "apiModelsAdd");
+  $("#api-model-cancel").hidden = !editingApiModel;
+  for (const element of $("#api-model-form").elements) element.disabled = apiModelsBusy;
+  updateApiModelHints();
+  if (apiModelMessage) showApiModelMessage(apiModelMessage.key, apiModelMessage.error);
+}
+async function loadApiModels() {
+  try {
+    const response = await fetch("/api/api-models");
+    if (response.status === 403) { apiModelsAvailable = false; apiModelConnections = []; renderApiModels(); return false; }
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.connections) || !Array.isArray(data.presets)) throw new Error("api_models_load_failed");
+    const first = !apiPresets.length;
+    apiModelsAvailable = data.available === true; apiPresets = data.presets;
+    apiModelConnections = data.connections.map(({ id, name, provider, baseUrl, model, hasApiKey }) => ({ id, name, provider, baseUrl, model, hasApiKey: !!hasApiKey }));
+    renderApiModels();
+    if (first) resetApiModelForm();
+    return apiModelsAvailable;
+  } catch { if (apiModelsAvailable) showApiModelMessage("apiModelRequestFailed", true); return false; }
+}
+async function saveApiModel(event) {
+  event.preventDefault(); if (!apiModelsAvailable || apiModelsBusy) return;
+  const connection = { name: $("#api-model-name").value.trim(), provider: $("#api-model-provider").value, baseUrl: $("#api-model-base").value.trim(), model: $("#api-model-model").value.trim() };
+  if (editingApiModel) connection.id = editingApiModel;
+  if ($("#api-model-key").value.trim()) connection.apiKey = $("#api-model-key").value.trim();
+  apiModelsBusy = true; showApiModelMessage("apiModelSaving"); renderApiModels();
+  try {
+    const response = await fetch("/api/api-models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(connection) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { showApiModelMessage(apiModelErrorKey(data.error), true); return; }
+    $("#api-model-key").value = ""; resetApiModelForm();
+    const loaded = await loadApiModels();
+    try { await loadAgents(true); showApiModelMessage(loaded ? "apiModelSaved" : "apiModelRefreshFailed", !loaded); }
+    catch { showApiModelMessage("apiModelRefreshFailed", true); }
+  } catch { showApiModelMessage("apiModelRequestFailed", true); }
+  finally { apiModelsBusy = false; renderApiModels(); }
+}
+async function deleteApiModel(connection) {
+  if (apiModelsBusy || !confirm(t("localModelDeleting")(connection.name))) return;
+  apiModelsBusy = true; renderApiModels();
+  try {
+    const response = await fetch(`/api/api-models/${encodeURIComponent(connection.id)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { showApiModelMessage(apiModelErrorKey(data.error), true); return; }
+    if (editingApiModel === connection.id) resetApiModelForm();
+    const loaded = await loadApiModels();
+    try { await loadAgents(true); showApiModelMessage(loaded ? "apiModelDeleted" : "apiModelRefreshFailed", !loaded); }
+    catch { showApiModelMessage("apiModelRefreshFailed", true); }
+  } catch { showApiModelMessage("apiModelRequestFailed", true); }
+  finally { apiModelsBusy = false; renderApiModels(); }
+}
+$("#api-model-form").onsubmit = saveApiModel;
+$("#api-model-cancel").onclick = () => resetApiModelForm();
+$("#api-model-base").oninput = updateApiModelHints;
+$("#api-model-provider").onchange = () => {
+  const preset = apiPreset();
+  $("#api-model-name").value = preset ? tx(preset.name) + " API" : "";
+  $("#api-model-base").value = preset?.baseUrl || ""; $("#api-model-model").value = preset?.model || "";
+  $("#api-model-key").value = ""; updateApiModelHints();
+};
+$("#manage-api-models").onclick = () => { openSheet("A"); $("#api-models").open = true; $("#local-models").open = false; };
+$("#api-models").ontoggle = () => { if ($("#api-models").open) $("#local-models").open = false; };
+$("#local-models").ontoggle = () => { if ($("#local-models").open) $("#api-models").open = false; };
+
+/* ---------- 本地模型连接 ---------- */
+function localModelErrorKey(code) {
+  return ({ invalid_local_model_connection: "localModelInvalid", local_models_limit: "localModelLimit", local_model_not_found: "localModelNotFound" })[code] || "localModelRequestFailed";
+}
+function showLocalModelMessage(key, error = false) {
+  localModelMessage = { key, error };
+  const message = $("#local-model-message");
+  message.textContent = t(key); message.classList.toggle("error", error);
+}
+function resetLocalModelForm(connection = null) {
+  editingLocalModel = connection?.id || null;
+  $("#local-model-name").value = connection?.name || "NInfer";
+  $("#local-model-base").value = connection?.baseUrl || "http://127.0.0.1:8080/v1";
+  $("#local-model-model").value = connection?.model || "";
+  $("#local-model-key").value = "";
+  $("#local-model-clear").checked = false;
+  renderLocalModels();
+}
+function renderLocalModels() {
+  const panel = $("#local-models"); if (!panel) return;
+  panel.hidden = !localModelsAvailable;
+  if (!localModelsAvailable) return;
+  const list = $("#local-model-list"); list.replaceChildren();
+  if (!localModelConnections.length) {
+    const empty = document.createElement("p"); empty.className = "hint"; empty.textContent = t("localModelsEmpty"); list.append(empty);
+  }
+  for (const connection of localModelConnections) {
+    const row = document.createElement("div"); row.className = "local-model-connection";
+    const info = document.createElement("div"), title = document.createElement("strong"), address = document.createElement("div"), model = document.createElement("div");
+    title.textContent = connection.name; address.textContent = connection.baseUrl;
+    model.textContent = `${connection.model ? `${t("modelLabel")}: ${connection.model}` : t("localModelAuto")}${connection.hasApiKey ? ` · ${t("localModelKeySaved")}` : ""}`;
+    address.className = model.className = "hint"; info.append(title, address, model);
+    const controls = document.createElement("div"); controls.className = "local-model-controls";
+    const edit = document.createElement("button"), remove = document.createElement("button");
+    for (const button of [edit, remove]) { button.type = "button"; button.className = "btn sm"; button.disabled = localModelsBusy; }
+    edit.textContent = t("localModelEdit"); edit.onclick = () => { resetLocalModelForm(connection); $("#local-model-name").focus(); };
+    remove.textContent = t("localModelDelete"); remove.onclick = () => deleteLocalModel(connection);
+    controls.append(edit, remove); row.append(info, controls); list.append(row);
+  }
+  const editing = localModelConnections.find((connection) => connection.id === editingLocalModel);
+  $("#local-model-form-title").textContent = t(editingLocalModel ? "localModelEditTitle" : "localModelAdd");
+  $("#local-model-cancel").hidden = !editingLocalModel;
+  $("#local-model-key").placeholder = t(editing?.hasApiKey ? "localModelKeyKeep" : "localModelKeyPh");
+  $("#local-model-clear-row").hidden = !editing?.hasApiKey;
+  for (const control of $("#local-model-form").elements) control.disabled = localModelsBusy;
+  $("#local-model-key").disabled = localModelsBusy || $("#local-model-clear").checked;
+  if (localModelMessage) showLocalModelMessage(localModelMessage.key, localModelMessage.error);
+}
+async function loadLocalModels() {
+  try {
+    const response = await fetch("/api/local-models");
+    if (response.status === 403) { localModelsAvailable = false; localModelConnections = []; renderLocalModels(); return false; }
+    const data = await response.json();
+    if (!response.ok || !data || !Array.isArray(data.connections)) throw new Error("local_models_load_failed");
+    localModelsAvailable = data.available === true;
+    localModelConnections = data.connections.map(({ id, name, baseUrl, model, hasApiKey }) => ({ id, name, baseUrl, model, hasApiKey: !!hasApiKey }));
+    renderLocalModels();
+    return localModelsAvailable;
+  } catch {
+    if (localModelsAvailable) showLocalModelMessage("localModelRequestFailed", true);
+    return false;
+  }
+}
+async function saveLocalModel(event) {
+  event.preventDefault();
+  if (localModelsBusy || !localModelsAvailable) return;
+  const connection = { name: $("#local-model-name").value.trim(), baseUrl: $("#local-model-base").value.trim(), model: $("#local-model-model").value.trim() };
+  if (editingLocalModel) connection.id = editingLocalModel;
+  if ($("#local-model-clear").checked) connection.apiKey = "";
+  else if ($("#local-model-key").value.trim()) connection.apiKey = $("#local-model-key").value.trim();
+  localModelsBusy = true; showLocalModelMessage("localModelSaving"); renderLocalModels();
+  try {
+    const response = await fetch("/api/local-models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(connection) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { showLocalModelMessage(localModelErrorKey(data.error), true); return; }
+    resetLocalModelForm(); const connectionsLoaded = await loadLocalModels();
+    try { await loadAgents(true); showLocalModelMessage(connectionsLoaded ? "localModelSaved" : "localModelRefreshFailed", !connectionsLoaded); }
+    catch { showLocalModelMessage("localModelRefreshFailed", true); }
+  } catch { showLocalModelMessage("localModelRequestFailed", true); }
+  finally { localModelsBusy = false; renderLocalModels(); }
+}
+async function deleteLocalModel(connection) {
+  if (localModelsBusy || !confirm(t("localModelDeleting")(connection.name))) return;
+  localModelsBusy = true; renderLocalModels();
+  try {
+    const response = await fetch(`/api/local-models/${encodeURIComponent(connection.id)}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { showLocalModelMessage(localModelErrorKey(data.error), true); return; }
+    if (editingLocalModel === connection.id) resetLocalModelForm();
+    const connectionsLoaded = await loadLocalModels();
+    try { await loadAgents(true); showLocalModelMessage(connectionsLoaded ? "localModelDeleted" : "localModelDeletedRefreshFailed", !connectionsLoaded); }
+    catch { showLocalModelMessage("localModelDeletedRefreshFailed", true); }
+  } catch { showLocalModelMessage("localModelRequestFailed", true); }
+  finally { localModelsBusy = false; renderLocalModels(); }
+}
+$("#local-model-form").onsubmit = saveLocalModel;
+$("#local-model-cancel").onclick = () => resetLocalModelForm();
+$("#local-model-clear").onchange = () => { if ($("#local-model-clear").checked) $("#local-model-key").value = ""; renderLocalModels(); };
+$("#local-model-name").onchange = () => {
+  if (!$("#local-model-base").value.trim() && /^(ninfer|strata)$/i.test($("#local-model-name").value.trim())) $("#local-model-base").value = "http://127.0.0.1:8080/v1";
+};
 async function openLogin(btn, id) {
   btn.disabled = true;
   const r = await fetch("/api/agents/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
@@ -180,13 +395,6 @@ function repositoryError(code) {
   if (/repository_local_only/.test(code)) return t("repoLocalOnly");
   if (/check_|invalid_check/.test(code)) return t("repoInvalidCommand");
   return code;
-}
-async function loadRepositoryAvailability() {
-  try {
-    const r = await fetch("/api/repositories/status"); const d = await r.json();
-    $("#work-mode option[value=repository]").disabled = !d.available;
-    $("#repository-browse").hidden = !d.available || !window.peergrading?.chooseRepository;
-  } catch {}
 }
 function updateRepositoryMode() {
   $("#repository-config").hidden = !isRepositoryMode();
@@ -221,16 +429,26 @@ function renderRepository() {
   const box = $("#repository-result"); if (!box) return;
   box.hidden = !repositoryManifest; if (!repositoryManifest) return;
   const m = repositoryManifest;
-  $("#repository-location").textContent = `${t("repoBranch")}: ${m.branch || ""}\n${t("repoWorktree")}: ${m.worktreePath || ""}\n${t("repoStatuses")[m.status] || m.status || ""}`;
+  const state = replayStatus === "interrupted" && m.status === "running" ? t("sessionInterrupted") : t("repoStatuses")[m.status] || m.status || "";
+  $("#repository-location").textContent = `${t("repoBranch")}: ${m.branch || ""}\n${t("repoWorktree")}: ${m.worktreePath || ""}\n${state}`;
   const snapshot = m.snapshots?.find((v) => v.n === currentVersion);
   const checks = snapshot?.checks || m.checks || [];
-  $("#repository-checks").replaceChildren(...checks.map((c) => {
+  const checkRows = checks.map((c) => {
     const row = document.createElement("div"); row.className = "repository-check";
-    const ok = c.ok ?? c.passed ?? c.code === 0;
+    const ok = c.evidenceValid !== false && (c.ok ?? c.passed ?? c.code === 0);
     row.textContent = `${ok ? "✓" : "✗"} ${(c.argv || c.command?.argv || []).join(" ")}${c.timedOut ? " (timeout)" : ""}`;
-    if (c.stdout || c.stderr) { const details = document.createElement("details"), title = document.createElement("summary"), output = document.createElement("pre"); title.textContent = lang === "zh" ? "查看输出" : "Output"; output.textContent = (c.stdout || "") + (c.stderr || ""); details.append(title, output); row.append(details); }
+    if (c.evidenceValid === false) { const explanation = document.createElement("div"); explanation.textContent = t("repoEvidenceInvalid"); row.append(explanation); }
+    if (c.stdout || c.stderr || c.id) {
+      const details = document.createElement("details"), title = document.createElement("summary"), output = document.createElement("pre"); title.textContent = lang === "zh" ? "查看输出与校验记录" : "Output and verification record";
+      const identity = c.id ? `${lang === "zh" ? "校验记录" : "Check"}: ${c.id}\n${c.startedAt || ""} → ${c.finishedAt || ""}\n${lang === "zh" ? "受检文件版本" : "Tested tree"}: ${c.treeBefore || ""}\n${lang === "zh" ? "退出码" : "Exit code"}: ${c.code ?? "—"}\n\n` : "";
+      output.textContent = identity + (c.stdoutTruncated || c.stderrTruncated ? t("repoLogTail") + "\n" : "") + (c.stdout || "") + (c.stderr ? "\n" + c.stderr : "") + (c.evidenceError ? "\n" + c.evidenceError : ""); details.append(title, output); row.append(details);
+    }
     return row;
-  }));
+  });
+  if (snapshot && !checks.length) { const note = document.createElement("div"); note.className = "repository-check"; note.textContent = t("repoNoChecks"); checkRows.push(note); }
+  const review = m.reviews?.filter((r) => r.version === snapshot?.n && r.commit === snapshot?.commit).at(-1);
+  if (snapshot && review) { const note = document.createElement("div"); note.className = "repository-check"; note.textContent = `${review.verdict === "approve" ? "✓" : "✗"} ${t(review.verdict === "approve" ? "repoReviewRecorded" : "repoReviewPending")} · ${review.reviewer}`; checkRows.push(note); }
+  $("#repository-checks").replaceChildren(...checkRows);
   const link = $("#repository-patch"); link.hidden = !snapshot || !currentSessionId;
   if (snapshot && currentSessionId) {
     link.download = `version-${currentVersion}.patch`;
@@ -241,26 +459,67 @@ function renderRepository() {
 }
 
 /* ---------- 运行 ---------- */
+const ASSIST_METRICS = ["started", "adopted", "fallbacks", "cacheHits", "overlapMs"];
+const assistMetrics = {};
+let assistPhase = "update";
+function renderAssistPhase() {
+  const node = $("#assist-phase"); if (node) node.textContent = t("assistPhases")[assistPhase] || t("assistPhases").update;
+}
+function renderAssistMetrics() {
+  let hasMetrics = false;
+  const formatter = new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en", { maximumFractionDigits: 0 });
+  for (const key of ASSIST_METRICS) {
+    const value = assistMetrics[key], node = $("#assist-" + key); if (!node) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    hasMetrics = true; node.textContent = key === "overlapMs" ? `${formatter.format(value)} ms` : formatter.format(value);
+  }
+  $("#assist-stats").hidden = !hasMetrics;
+}
+function resetAssist() {
+  assistPhase = "update";
+  for (const key of ASSIST_METRICS) delete assistMetrics[key];
+  $("#assist-status").hidden = true; $("#assist-stats").hidden = true;
+  renderAssistPhase();
+}
+function handleAssist(ev) {
+  const phases = t("assistPhases");
+  const aliases = { started: "start", adopted: "adopt" };
+  const requestedPhase = aliases[ev.phase] || ev.phase;
+  assistPhase = typeof requestedPhase === "string" && Object.hasOwn(phases, requestedPhase) ? requestedPhase : "update";
+  $("#assist-status").hidden = false; renderAssistPhase();
+  const result = ev.result?.acceleration ?? ev.result ?? ev.acceleration ?? ev;
+  if (result && typeof result === "object") {
+    for (const key of ASSIST_METRICS) if (Number.isFinite(result[key]) && result[key] >= 0) assistMetrics[key] = result[key];
+  }
+  renderAssistMetrics(); scrollBottom();
+}
 function resetView() {
   $("#timeline").innerHTML = ""; $("#tabs").innerHTML = ""; $("#version-body").innerHTML = ""; $("#final").textContent = "";
   msgs.clear(); versions.length = 0; currentVersion = 0; currentSessionId = null;
-  repositoryManifest = null; repositoryRun = false; ++diffRequest; $("#repository-result").hidden = true; $("#repository-diff").textContent = "";
+  repositoryManifest = null; repositoryRun = false; replayStatus = null; ++diffRequest; $("#repository-result").hidden = true; $("#repository-diff").textContent = "";
   if ($("#finalizer")) { $("#finalizer").hidden = true; $("#fin-log").innerHTML = ""; $("#fin-result").innerHTML = ""; }
+  resetAssist();
 }
-function setRunning(on) { $("#start").disabled = on; $("#stop").disabled = !on; for (const id of ["work-mode", "repository-path", "repository-tests", "repository-browse", "repository-inspect", "history"]) $("#" + id).disabled = on; renderFinalizer(); }
-function scrollBottom() { const tl = $("#timeline"); tl.scrollTop = tl.scrollHeight; }
+function setRunning(on) { $("#start").disabled = on; $("#stop").disabled = !on; for (const id of ["work-mode", "repository-path", "repository-tests", "repository-browse", "repository-inspect", "history", "acceleration-speculative-review", "acceleration-cache"]) $("#" + id).disabled = on; renderFinalizer(); }
+function scrollBottom() { const main = $(".main"); main.scrollTop = main.scrollHeight; }
 
 function handle(ev) {
   const tl = $("#timeline");
   switch (ev.type) {
     case "run": runId = ev.id; currentSessionId = ev.id; break;
+    case "assist": handleAssist(ev); break;
     case "repository_ready": repositoryRun = true; repositoryManifest = ev.repository; renderRepository(); break;
     case "repository_snapshot":
       if (repositoryManifest) { repositoryManifest.snapshots ||= []; const i = repositoryManifest.snapshots.findIndex((x) => x.n === ev.snapshot.n); if (i >= 0) repositoryManifest.snapshots[i] = ev.snapshot; else repositoryManifest.snapshots.push(ev.snapshot); repositoryManifest.finalCommit = ev.snapshot.commit; }
       renderRepository(); break;
     case "repository_check":
       if (repositoryManifest) { repositoryManifest.checks ||= []; repositoryManifest.checks.push(ev.check); } renderRepository(); break;
-    case "status": { const p = document.createElement("p"); p.className = "sys"; p.textContent = ev.text; tl.appendChild(p); $("#status").textContent = ev.text; scrollBottom(); break; }
+    case "repository_review":
+      if (repositoryManifest) { repositoryManifest.reviews ||= []; if (!repositoryManifest.reviews.some((r) => r.id === ev.review.id)) repositoryManifest.reviews.push(ev.review); } renderRepository(); break;
+    case "status": {
+      if (ev.assist) handleAssist({ phase: ev.assist.phase, result: ev.assist.stats });
+      const p = document.createElement("p"); p.className = "sys"; p.textContent = ev.text; tl.appendChild(p); $("#status").textContent = ev.text; scrollBottom(); break;
+    }
     case "message_start": {
       const el = document.createElement("div"); el.className = "msg " + ev.agent;
       el.innerHTML = `<div class="avatar">${ev.agent}</div><div class="bubble"><div class="meta"><b>${esc(ev.name)}</b><span class="tag">${esc(t("round")(ev.round))} · ${esc(t("kinds")[ev.kind] || ev.kind)}</span><span class="tag">${esc(ev.source || ev.model)}</span><span class="verdict"></span></div><div class="body cursor"></div><div class="usage"></div></div>`;
@@ -367,7 +626,11 @@ function handle(ev) {
       m.relay?.remove(); m.relay = null; m.body.classList.add("cursor");
       break;
     }
-    case "done": $("#final").textContent = "✓ " + ev.reason; showVersion(ev.finalVersion); setTimeout(renderFinalizer, 300); break;
+    case "done": {
+      const acceleration = ev.acceleration ?? ev.assist;
+      if (acceleration) handleAssist({ phase: "result", result: acceleration });
+      $("#final").textContent = (ev.approved === true ? "✓ " : "• ") + ev.reason; showVersion(ev.finalVersion); setTimeout(renderFinalizer, 300); break;
+    }
     case "error": {
       for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
       settleMediaRows();
@@ -406,7 +669,7 @@ function renderMediaSettings() {
   if (!c) { hint.textContent = ""; box.hidden = true; imgs.disabled = vids.disabled = true; imgs.checked = vids.checked = false; return; }
   imgs.disabled = !c.configured || !c.images; vids.disabled = !c.configured || !c.videos;
   imgs.checked = !imgs.disabled && !!mediaPref.images; vids.checked = !vids.disabled && !!mediaPref.videos;
-  hint.textContent = c.configured ? (c.canEdit ? t("mediaReady")(c.keyHint, c.limits.images, c.limits.videos) : t("mediaReadyUser")(c.limits.images, c.limits.videos)) : c.canEdit ? t("mediaNotConfigured") : t("mediaNotConfiguredUser");
+  hint.textContent = c.configured ? t("mediaReady")(c.keyHint, c.limits.images, c.limits.videos) : t("mediaNotConfigured");
   box.hidden = !c.canEdit;
   if (c.canEdit) {
     $("#media-key").value = ""; $("#media-key").placeholder = c.configured ? t("mediaKeyKeep")(c.keyHint) : t("mediaKeyPh");
@@ -460,7 +723,7 @@ async function runFinalizer() {
   try {
     const res = await fetch("/api/finalize", { method: "POST", headers: { "Content-Type": "application/json" }, signal: finController.signal,
       body: JSON.stringify({ sessionId: currentSessionId, versionN: currentVersion, agentId: $("#fin-agent").value, sandbox: $("#fin-sandbox").value, maxFixAttempts: $("#fin-fix").value, pull: $("#fin-pull").checked }) });
-    if (!res.ok) { const j = await res.json().catch(() => ({})); if (res.status === 403 && j.error === "payment_required") showPaywall(j.access); else line("error", j.error || res.status); return; }
+    if (!res.ok) { const j = await res.json().catch(() => ({})); line("error", j.error || res.status); return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
@@ -501,6 +764,7 @@ async function start() {
   if (isRepositoryMode() && !$("#repository-path").value.trim()) { $("#status").textContent = t("repoNeedPath"); return; }
   if (isRepositoryMode() && ![chosen.A, chosen.B].every((a) => ["claude-code", "codex", "kimi-code"].includes(a.runner?.type))) { $("#status").textContent = t("repoAgentsRequired"); return; }
   const body = { mode: $("#work-mode").value, repository: isRepositoryMode() ? { path: $("#repository-path").value.trim(), testCommands: $("#repository-tests").value } : undefined, task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
+    acceleration: { speculativeReview: $("#acceleration-speculative-review").checked, cache: $("#acceleration-cache").checked },
     media: { images: !isRepositoryMode() && $("#media-images").checked, videos: !isRepositoryMode() && $("#media-videos").checked } };
   resetView(); repositoryRun = body.mode === "repository"; setRunning(true);
   controller = new AbortController();
@@ -508,7 +772,6 @@ async function start() {
     const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      if (res.status === 403 && j.error === "payment_required") { showPaywall(j.access); setRunning(false); return; }
       const e = j.error; handle({ type: "error", message: e === "EMPTY_TASK" ? t("needTask") : e === "NO_AGENT" ? t("needAgents") : repositoryError(e || String(res.status)) }); return;
     }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
@@ -526,7 +789,7 @@ async function start() {
   } finally {
     for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
     settleMediaRows();
-    setRunning(false); runId = null; loadHistory(); bootstrapAuth(); refreshRepositoryResult();
+    setRunning(false); runId = null; loadHistory(); refreshRepositoryResult();
   }
 }
 async function stop() { if (runId) await fetch("/api/stop/" + runId, { method: "POST" }); controller?.abort(); handle({ type: "status", text: t("stopped") }); }
@@ -539,11 +802,16 @@ async function replay(id) {
   if (!id) return;
   const s = await (await fetch("/api/sessions/" + id)).json();
   resetView(); currentSessionId = id; repositoryRun = !!s.config.repository;
+  replayStatus = s.status || null;
   $("#work-mode").value = repositoryRun ? "repository" : "text";
   if (repositoryRun) { $("#repository-path").value = s.config.repository.path; $("#repository-tests").value = (s.config.repository.checks || []).map((c) => c.argv.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ")).join("\n"); }
   updateRepositoryMode();
   $("#task").value = s.config.task;
+  $("#acceleration-speculative-review").checked = s.config.acceleration?.speculativeReview ?? true;
+  $("#acceleration-cache").checked = s.config.acceleration?.cache ?? true;
   for (const ev of s.events) handle(ev);
+  const stateMessage = { interrupted: "sessionInterrupted", failed: "sessionFailed", cancelled: "sessionCancelled", running: "sessionRunning" }[s.status];
+  if (stateMessage) handle({ type: "status", text: t(stateMessage) });
   refreshRepositoryResult();
   for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; m.prog?.remove(); } }
 }
@@ -551,11 +819,12 @@ async function replay(id) {
 /* ---------- 初始化 ---------- */
 for (const k of ["A", "B"]) {
   $("#effort-" + k).innerHTML = ["low", "medium", "high", "xhigh", "max"].map((e) => `<option${e === "high" ? " selected" : ""}>${e}</option>`).join("");
+  $("#pick-" + k).onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openSheet(k); } };
 }
 $("#start").onclick = start;
 $("#stop").onclick = stop;
 $("#history").onchange = (e) => replay(e.target.value);
 applyI18n();
-bootstrapAuth().then((ok) => { if (!ok) return; renderAccess(); loadHistory(); loadAgents(); loadFinEnv(); loadMediaSettings(); loadRepositoryAvailability();
+bootstrap().then(() => { loadHistory(); loadAgents().catch(() => {}); loadFinEnv(); loadMediaSettings(); loadLocalModels(); loadApiModels();
 fetch("/api/apps").then((r) => r.json()).then((j) => { $("#apps").innerHTML = j.apps.map((a) => `<option value="${esc(a)}">`).join(""); }).catch(() => {});
-});
+}).catch(() => { $("#start").disabled = true; $("#status").textContent = t("bootstrapFailed"); });

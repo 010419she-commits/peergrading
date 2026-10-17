@@ -1,13 +1,19 @@
-# peergrading.ai — 生产镜像（Node 24，直接运行 TypeScript）
+# PeerGrading 无账号下载站点；本地桌面入口不会在此镜像中启动。
 FROM node:24-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production
-# 收尾 Agent 在容器内以“本机直接运行”模式执行用户代码；给它 python3 与 git
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv git ca-certificates && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 COPY . .
-RUN mkdir -p data sessions downloads && chown -R node:node /app
+RUN npm run bundle \
+  && npm prune --omit=dev \
+  && chown -R node:node /app
+
+ENV NODE_ENV=production
 USER node
 EXPOSE 3000
-CMD ["node", "--no-warnings=ExperimentalWarning", "server.ts"]
+CMD ["node", "--no-warnings=ExperimentalWarning", "dist/site-server.mjs"]

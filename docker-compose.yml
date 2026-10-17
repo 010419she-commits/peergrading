@@ -1,14 +1,12 @@
-# 服务器上：docker compose up -d --build
+# 无账号公网下载站点：docker compose up -d --build
 services:
   app:
     build: .
     restart: unless-stopped
-    env_file: .env
     environment:
-      - PORT=3000
-    volumes:
-      - ./data:/app/data           # SQLite：用户、会话、订单
-      - ./sessions:/app/sessions   # 协作记录、冻结版本、收尾报告
-      - ./downloads:/app/downloads # 软件安装包（用 deploy/upload-release.sh 上传）
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      BASE_URL: ${BASE_URL:-https://peergrading.ai}
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-010419she-commits/peergrading}
     ports:
-      - "127.0.0.1:3000:3000"      # 只对本机开放，由 Caddy 对外提供 HTTPS
+      - "127.0.0.1:3000:3000" # 仅由本机 Caddy 对外提供 HTTPS

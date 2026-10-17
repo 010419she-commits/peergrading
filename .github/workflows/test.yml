@@ -1,0 +1,34 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build local and public entry points
+        run: npm run bundle
+      - name: Check generated entry points
+        run: |
+          test -f dist/server.mjs
+          test -f dist/site-server.mjs
+          test -f public/app-vendor.js
+      - name: Open-source safety check (when provided)
+        if: hashFiles('scripts/check-open-source.mjs') != ''
+        run: node scripts/check-open-source.mjs

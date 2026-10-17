@@ -33,43 +33,74 @@
   document.getElementById("year").textContent = String(new Date().getFullYear());
 
   const downloads = document.getElementById("downloads");
-  const safeInstaller = (item) => {
-    if (!item || typeof item.file !== "string" || typeof item.url !== "string" || !Number.isFinite(item.size) || item.size <= 0) return null;
+  const fallback = document.getElementById("download-fallback");
+  const REPO = "010419she-commits/peergrading";
+  const SOURCE_URL = `https://github.com/${REPO}`;
+  const RELEASES_URL = `${SOURCE_URL}/releases`;
+  const externalLink = (key, href) => make("a", { className: "text-link", href, target: "_blank", rel: "noopener noreferrer", textContent: t(key) });
+  fallback.replaceChildren(externalLink("sourceCode", SOURCE_URL), externalLink("allReleases", RELEASES_URL));
+
+  const safeInstaller = (item, version) => {
+    if (!item || typeof item.name !== "string" || typeof item.url !== "string" || typeof item.platform !== "string" || typeof item.arch !== "string") return null;
+    if (!["macos", "windows"].includes(item.platform) || !/^[A-Za-z0-9._-]{1,80}$/.test(item.arch)) return null;
+    if (!item.name || item.name.length > 255 || item.name !== item.name.trim() || /[\/\\\u0000-\u001f]/.test(item.name)) return null;
+    if (item.size !== undefined && (!Number.isFinite(item.size) || item.size <= 0)) return null;
+    if (item.sha256 !== undefined && (typeof item.sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(item.sha256))) return null;
     try {
-      const url = new URL(item.url, location.origin);
-      if (url.origin !== location.origin || !url.pathname.startsWith("/download/")) return null;
-      return { ...item, url: url.href, version: typeof item.version === "string" ? item.version : "" };
+      const url = new URL(item.url);
+      if (url.origin !== "https://github.com" || url.username || url.password || url.search || url.hash) return null;
+      const parts = url.pathname.split("/").filter(Boolean);
+      const prefix = [...REPO.split("/"), "releases", "download"];
+      if (parts.length !== prefix.length + 2 || !prefix.every((part, index) => parts[index] === part)) return null;
+      if (parts[prefix.length] !== version && parts[prefix.length] !== `v${version}`) return null;
+      if (decodeURIComponent(parts.at(-1)) !== item.name) return null;
+      return { name: item.name, url: url.href, platform: item.platform, arch: item.arch, size: item.size ?? null, sha256: item.sha256?.toLowerCase() || "" };
     } catch { return null; }
   };
-  const platformCard = (name, subtitle, installers, mac) => {
-    const available = installers.filter(([, item]) => item);
-    const card = make("article", { className: "plan download-card" + (available.length ? " featured" : "") });
-    card.append(make("div", { className: "download-card-heading" }, make("span", { className: "platform-symbol", textContent: mac ? "⌘" : "⊞", ariaHidden: "true" }), make("h3", { textContent: name })), make("p", { className: "muted", textContent: subtitle }));
+  const formatSize = (bytes) => {
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes, unit = 0;
+    while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+    return `${new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en", { maximumFractionDigits: 1 }).format(value)} ${units[unit]}`;
+  };
+  const platformCard = (platform, installers, version) => {
+    const card = make("article", { className: "plan download-card" + (installers.length ? " featured" : "") });
+    const mac = platform === "macos";
+    card.append(make("div", { className: "download-card-heading" }, make("span", { className: "platform-symbol", textContent: mac ? "⌘" : "⊞", ariaHidden: "true" }), make("h3", { textContent: t(mac ? "dlMac" : "dlWin") })), make("p", { className: "muted", textContent: t(mac ? "dlMacSub" : "dlWinSub") }));
     const links = make("div", { className: "installer-links" });
-    for (const [label, item] of available) {
-      const button = make("a", { className: "button button-primary", href: item.url, textContent: `${t("downloadBtn")(item.version)}${label ? " · " + label : ""}` });
-      links.append(make("div", { className: "installer" }, button, make("p", { className: "fine installer-file", textContent: `${item.file} · ${Math.round(item.size / 1048576)} MB` })));
+    for (const item of installers) {
+      const button = make("a", { className: "button button-primary", href: item.url, textContent: `${t("downloadBtn")(version)} · ${item.arch}` });
+      const metadata = make("dl", { className: "installer-meta" });
+      const addMetadata = (label, value, code = false) => {
+        const row = make("div", { className: "installer-meta-row" });
+        row.append(make("dt", { textContent: label }), make("dd", { textContent: value }));
+        if (code) row.classList.add("installer-sha");
+        metadata.append(row);
+      };
+      addMetadata(t("dlVersion"), version);
+      addMetadata(t("dlArchitecture"), item.arch);
+      if (item.size) addMetadata(t("dlSize"), formatSize(item.size));
+      if (item.sha256) addMetadata(t("dlSha256"), item.sha256, true);
+      links.append(make("div", { className: "installer" }, button, make("p", { className: "fine installer-file", textContent: item.name }), metadata));
     }
-    if (!available.length) links.append(make("p", { className: "muted", textContent: t("dlSoon") }));
+    if (!installers.length) links.append(make("p", { className: "muted", textContent: t("dlSoon") }));
     card.append(links);
-    if (available.length && mac) {
-      const details = make("details", { className: "install-help" });
-      details.append(make("summary", { textContent: lang === "zh" ? "macOS 安装提示" : "macOS installation note" }), make("p", { textContent: t("dlMacGatekeeper") }), make("code", { textContent: "xattr -cr /Applications/PeerGrading.app" }));
-      card.append(details);
-    }
     return card;
   };
   async function loadDownloads() {
     downloads.setAttribute("aria-busy", "true");
     try {
-      const response = await fetch("/api/download/latest", { headers: { accept: "application/json" } });
+      const response = await fetch("/installers.json", { headers: { accept: "application/json" }, cache: "no-cache" });
       if (!response.ok) throw new Error("download_unavailable");
       const data = await response.json();
-      if (!data || !["macArm", "macIntel", "win"].some((key) => Object.hasOwn(data, key))) throw new Error("invalid_downloads");
+      if (!data || data.repo !== REPO || typeof data.version !== "string" || !/^\d+\.\d+\.\d+$/.test(data.version) || !Array.isArray(data.assets)) throw new Error("invalid_downloads");
+      const assets = data.assets.map((item) => safeInstaller(item, data.version)).filter(Boolean);
+      const rejected = data.assets.length - assets.length;
       downloads.replaceChildren(
-        platformCard(t("dlMac"), t("dlMacSub"), [[t("dlApple"), safeInstaller(data.macArm)], [t("dlIntel"), safeInstaller(data.macIntel)]], true),
-        platformCard(t("dlWin"), t("dlWinSub"), [["", safeInstaller(data.win)]], false),
+        platformCard("macos", assets.filter((item) => item.platform === "macos"), data.version),
+        platformCard("windows", assets.filter((item) => item.platform === "windows"), data.version),
       );
+      if (rejected) downloads.append(make("p", { className: "notice download-validation", textContent: t("dlInvalid") }));
     } catch {
       const retry = make("button", { className: "button small", type: "button", textContent: t("homeRetryDownload") });
       retry.addEventListener("click", () => { retry.disabled = true; loadDownloads(); });

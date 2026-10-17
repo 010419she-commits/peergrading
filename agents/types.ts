@@ -2,7 +2,9 @@
 
 export type Lang = "zh" | "en";
 
-export type Turn = { role: "user" | "assistant"; text: string };
+export type ApiAssistantMessage = { role: "assistant"; content: string; reasoning_content?: string };
+
+export type Turn = { role: "user" | "assistant"; text: string; apiMessage?: ApiAssistantMessage };
 
 export interface ChatRequest {
   system: string;
@@ -11,6 +13,7 @@ export interface ChatRequest {
   cwd: string;                // CLI 类后端的工作目录
   /** Repository phases explicitly opt into file tools; ordinary conversations stay text-only. */
   repositoryAccess?: "read-only" | "write";
+  cache?: boolean;
   signal: AbortSignal;
   onDelta: (text: string) => void;
   onProgress?: (p: { phase: "reasoning" | "running"; chars?: number }) => void;
@@ -20,6 +23,8 @@ export interface ChatResult {
   text: string;
   model?: string;
   usage?: { input: number; output: number };
+  apiMessage?: ApiAssistantMessage;
+  cacheHit?: boolean;
 }
 
 export interface Backend {
@@ -32,7 +37,7 @@ export type RunnerSpec =
   | { type: "gemini-cli"; bin: string; model?: string }
   | { type: "codex"; bin: string; model?: string }
   | { type: "kimi-code"; bin: string; model?: string }
-  | { type: "openai"; baseUrl: string; apiKey: string; model: string }
+  | { type: "openai"; baseUrl: string; apiKey: string; model: string; timeoutMs?: number }
   | { type: "anthropic"; model: string; effort: string }
   | { type: "relay"; mode: "manual" | "clipboard"; app?: string }
   | { type: "generic"; bin: string; args: string[]; promptVia: "stdin" | "arg"; parse: "jsonl" | "text" };
@@ -48,6 +53,7 @@ export interface AgentInfo {
   subtitle: Text;       // 一句话描述接入方式
   model: Text;          // 当前接入的模型
   local: boolean;       // 本地部署 or 云端
+  deployment?: "local" | "cloud"; // CLI 无法仅凭类型推断实际部署位置
   status: AgentStatus;
   auto: boolean;        // true = 一键全自动；false = 需要你在应用里手动粘贴/复制
   repository?: boolean; // supports the restricted repository file-tool protocol

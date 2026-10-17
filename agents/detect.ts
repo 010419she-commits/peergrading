@@ -3,11 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { AgentInfo, RunnerSpec, Text } from "./types.ts";
+import { configuredQwenLocalEndpoint, detectLocalOpenAIAgents } from "./local.ts";
+import { loadLocalConnections } from "./local-connections.ts";
+import { loadApiConnections } from "./api-connections.ts";
+import { savedApiAgents } from "./api.ts";
 import { clipboardAvailable } from "./relay.ts";
 import { kimiAccountSummary } from "./kimi.ts";
 import { getProxyEnv, proxyEnvPrefix } from "./proxy.ts";
 import { WIN, POWERSHELL, findBin, spawnCli, killTree, quoteForDisplay, stripNestedClaudeEnv, resetLaunchers } from "./launch.ts";
+import { clearOpenAIResponseCache } from "../acceleration.ts";
 
 export { findBin, needsShell } from "./launch.ts";
 
@@ -172,12 +178,32 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
   return info;
 }
 
-async function detectQwenCloud(): Promise<AgentDraft | null> {
+async function detectQwenCloud(settings: any, localAgents?: AgentInfo[]): Promise<AgentDraft | null> {
   const bin = findBin("qwen");
   if (!bin) return null;
-  const settings = readJson(path.join(HOME, ".qwen", "settings.json"));
   const authType: string | undefined = settings?.security?.auth?.selectedType;
   const configuredModel: string | undefined = settings?.model?.name ?? process.env.OPENAI_MODEL;
+  const local = configuredQwenLocalEndpoint(settings);
+  if (local) {
+    const ownCandidates = localAgents?.filter((agent) => agent.runner.type === "openai"
+      && agent.runner.baseUrl === local.baseUrl && agent.runner.apiKey === local.apiKey);
+    const candidate = ownCandidates?.find((agent) => agent.runner.type === "openai" && (!local.model || agent.runner.model === local.model));
+    const model = local.model ?? (candidate?.runner.type === "openai" ? candidate.runner.model || undefined : undefined);
+    return {
+      id: "qwen-code", kind: "cli", title: "Qwen Code", icon: "Q", local: true,
+      subtitle: L(`本地模型 · ${local.baseUrl}`, `Local model · ${local.baseUrl}`),
+      model: model ?? L("未选择模型", "No model selected"),
+      status: candidate?.status ?? "unverified",
+      statusDetail: candidate?.statusDetail ?? (localAgents ? L(
+        "已识别本地配置，尚未确认这组模型和密钥是否可用。也可选择已识别的本地直连模型。",
+        "Local configuration detected; this model and key have not been verified together. You can also choose a discovered direct local model.",
+      ) : undefined),
+      // A harmless local placeholder prevents Qwen from falling back to a global cloud key.
+      runner: { type: "qwen-code", bin, model, openai: {
+        baseUrl: local.baseUrl, apiKey: local.apiKey || "local",
+      } },
+    };
+  }
 
   const info: AgentDraft = {
     id: "qwen-code",
@@ -247,8 +273,8 @@ async function detectOllama(): Promise<LocalServer | null> {
   return { service: "ollama", title: "Ollama", baseUrl: `${OLLAMA_URL}/v1`, apiKey: "ollama", up: Boolean(live), models, loaded, installed: Boolean(ollama) };
 }
 
-/** 每个本地服务一个条目（直连）+ 一个「Qwen Code 经由它」的条目；模型取当前已加载的，否则第一个 */
-function localEntries(srv: LocalServer, qwenBin: string | null): AgentDraft[] {
+/** Each discovered model gets stable direct and (when installed) Qwen Code entries. */
+export function localEntries(srv: LocalServer, qwenBin: string | null): AgentDraft[] {
   const icon = srv.service === "lmstudio" ? "▣" : "◌";
   if (srv.models.length === 0) {
     return [{
@@ -257,18 +283,20 @@ function localEntries(srv: LocalServer, qwenBin: string | null): AgentDraft[] {
       icon, runner: { type: "openai", baseUrl: srv.baseUrl, apiKey: srv.apiKey, model: "" },
     }];
   }
-  const model = srv.loaded ?? srv.models[0];
   const status = srv.up ? "ready" : "server_off";
   const statusDetail = srv.up ? undefined : L("本地服务未运行，可在此一键启动", "Local server is not running; start it here with one click");
-  const out: AgentDraft[] = [{
-    id: `${srv.service}`, kind: "local", title: srv.title,
-    subtitle: L("本地模型 · 直连 OpenAI 兼容接口", "Local model · direct OpenAI-compatible API"),
-    model, local: true, status, statusDetail, service: srv.service, icon,
-    runner: { type: "openai", baseUrl: srv.baseUrl, apiKey: srv.apiKey, model },
-  }];
-  if (qwenBin) {
+  const models = [...new Set([...(srv.loaded ? [srv.loaded] : []), ...srv.models].filter((model) => typeof model === "string" && model.trim()))];
+  const out: AgentDraft[] = [];
+  for (const model of models) {
+    const modelId = encodeURIComponent(model);
     out.push({
-      id: `qwen-code:${srv.service}`, kind: "cli", title: "Qwen Code",
+      id: `${srv.service}:${modelId}`, kind: "local", title: srv.title,
+      subtitle: L("本地模型 · 直连 OpenAI 兼容接口", "Local model · direct OpenAI-compatible API"),
+      model, local: true, status, statusDetail, service: srv.service, icon,
+      runner: { type: "openai", baseUrl: srv.baseUrl, apiKey: srv.apiKey, model },
+    });
+    if (qwenBin) out.push({
+      id: `qwen-code:${srv.service}:${modelId}`, kind: "cli", title: "Qwen Code",
       subtitle: L(`本地模型 · 通过 ${srv.title} 接入`, `Local model · via ${srv.title}`),
       model, local: true, status, statusDetail, service: srv.service, icon: "Q",
       runner: { type: "qwen-code", bin: qwenBin, model, openai: { baseUrl: srv.baseUrl, apiKey: srv.apiKey } },
@@ -464,7 +492,7 @@ async function detectKimiApi(): Promise<AgentDraft | null> {
   if (!key) return null;
   const info: AgentDraft = {
     id: "kimi-api", kind: "api", icon: "K",
-    title: "Kimi Code",
+    title: "Kimi API",
     subtitle: L("Moonshot 云端 · 通过你环境里的 KIMI_API_KEY 直连", "Moonshot cloud · direct via your KIMI_API_KEY"),
     model: process.env.KIMI_MODEL ?? "kimi-k2-0905-preview", local: false, status: "unverified",
     runner: { type: "openai", baseUrl: KIMI_URL, apiKey: key, model: process.env.KIMI_MODEL ?? "kimi-k2-0905-preview" },
@@ -572,22 +600,40 @@ function detectGenericClis(): AgentDraft[] {
 
 // ---------- 汇总 + 缓存 ----------
 
-let cache: { at: number; agents: AgentInfo[] } | null = null;
-let inflight: Promise<AgentInfo[]> | null = null;
+let generation = 0;
+let cache: { generation: number; at: number; agents: AgentInfo[] } | null = null;
+let inflight: { generation: number; promise: Promise<AgentInfo[]> } | null = null;
 const TTL = 5 * 60 * 1000;
 const SCAN_MODELS = process.env.SCAN_MODELS === "1";   // 默认只扫描 agent，不扫描本地/云端大模型
 
-export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
-  if (!refresh && cache && Date.now() - cache.at < TTL) return cache.agents;
-  if (inflight) return inflight;
-  if (refresh) resetLaunchers();   // CLI 升级后包装脚本背后的目标可能变了
-  inflight = (async () => {
+export function invalidateAgentCache(): void {
+  cache = null;
+  generation++;
+  clearOpenAIResponseCache();
+}
+
+function validCache(): boolean {
+  return cache !== null && cache.generation === generation && Date.now() - cache.at < TTL;
+}
+
+async function scanAgents(): Promise<AgentInfo[]> {
     const qwenBin = findBin("qwen");
-    const [claude, qwen, cdx, kimiCode, kimiApi, lm, ollama] = await Promise.all([
-      detectClaudeCode(), detectQwenCloud(), detectCodex(), detectKimiCode(), detectKimiApi(),
+    const settings = readJson(path.join(HOME, ".qwen", "settings.json"));
+    const connectionsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", process.env.DATA_DIR || "data");
+    let connections: ReturnType<typeof loadLocalConnections> = [];
+    // A damaged local settings file should not prevent discovering other agents.
+    if (SCAN_MODELS) { try { connections = loadLocalConnections(connectionsDir); } catch {} }
+    const localModels = SCAN_MODELS ? detectLocalOpenAIAgents({ settings, connections }) : Promise.resolve([]);
+    const [claude, qwen, cdx, kimiCode, kimiApi, lm, ollama, local] = await Promise.all([
+      detectClaudeCode(), localModels.then((agents) => detectQwenCloud(settings, SCAN_MODELS ? agents : undefined)), detectCodex(), detectKimiCode(), detectKimiApi(),
       SCAN_MODELS ? detectLmStudio() : Promise.resolve(null), SCAN_MODELS ? detectOllama() : Promise.resolve(null),
+      localModels,
     ]);
     const agents: AgentInfo[] = [] as any;
+    // Explicit desktop settings are separate from automatic local discovery.
+    if (process.env.LOCAL_MODE === "1") {
+      try { agents.push(...savedApiAgents(loadApiConnections(connectionsDir))); } catch {}
+    }
     if (claude) agents.push(claude as AgentInfo);
     if (cdx) agents.push(cdx);
     if (qwen) agents.push(qwen);
@@ -600,6 +646,7 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
       const api = detectAnthropicApi(); if (api) agents.push(api);
       if (lm) agents.push(...localEntries(lm, qwenBin));
       if (ollama) agents.push(...localEntries(ollama, qwenBin));
+      agents.push(...local);
     }
     agents.push(...relayEntries());
     for (const a of agents) {
@@ -608,11 +655,31 @@ export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
     }
     // 全自动的排前面
     agents.sort((x, y) => Number(y.auto) - Number(x.auto));
-    cache = { at: Date.now(), agents };
-    inflight = null;
     return agents;
-  })();
-  return inflight;
+}
+
+export async function detectAgents(refresh = false): Promise<AgentInfo[]> {
+  if (refresh) {
+    resetLaunchers();   // CLI 升级后包装脚本背后的目标可能变了
+    invalidateAgentCache();
+  }
+  for (;;) {
+    if (validCache()) return cache!.agents;
+    if (!inflight || inflight.generation !== generation) inflight = { generation, promise: scanAgents() };
+    const pending = inflight;
+    try {
+      const agents = await pending.promise;
+      // A connection may have changed while HTTP/CLI probes were running. Follow the current scan.
+      if (pending.generation !== generation) continue;
+      cache = { generation, at: Date.now(), agents };
+      return agents;
+    } catch (error) {
+      if (pending.generation !== generation) continue;
+      throw error;
+    } finally {
+      if (inflight === pending) inflight = null;
+    }
+  }
 }
 
 /** 一键登录：返回要在终端里执行的命令。Claude Code 若支持 `auth login` 子命令就直接用，否则进入交互界面并提示输入 /login */
@@ -642,7 +709,7 @@ export async function loginCommandFor(id: string): Promise<LoginCommand | null> 
 }
 
 export function getCachedAgent(id: string): AgentInfo | undefined {
-  return cache?.agents.find((a) => a.id === id);
+  return validCache() ? cache!.agents.find((a) => a.id === id) : undefined;
 }
 
 /** 一键启动本地模型服务 */
@@ -652,7 +719,7 @@ export async function startService(service: "lmstudio" | "ollama"): Promise<{ ok
     if (!lms) return { ok: false, message: "未找到 lms 命令，请先安装 LM Studio" };
     const r = await run(lms, ["server", "start"], "", 20_000);
     const up = await fetchJson(`${LMSTUDIO_URL}/v1/models`, 3000);
-    cache = null;
+    invalidateAgentCache();
     return up ? { ok: true, message: "LM Studio 服务已启动" } : { ok: false, message: (r.stderr || r.stdout).slice(0, 300) };
   }
   const ollama = findBin("ollama");
@@ -661,7 +728,7 @@ export async function startService(service: "lmstudio" | "ollama"): Promise<{ ok
   child.unref();
   for (let i = 0; i < 10; i++) {
     await new Promise((r) => setTimeout(r, 500));
-    if (await fetchJson(`${OLLAMA_URL}/api/tags`, 1000)) { cache = null; return { ok: true, message: "Ollama 服务已启动" }; }
+    if (await fetchJson(`${OLLAMA_URL}/api/tags`, 1000)) { invalidateAgentCache(); return { ok: true, message: "Ollama 服务已启动" }; }
   }
   return { ok: false, message: "Ollama 启动超时" };
 }

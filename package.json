@@ -1,35 +1,35 @@
 {
   "name": "peergrading",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
+  "license": "MIT",
+  "author": "PeerGrading contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/010419she-commits/peergrading.git"
+  },
   "type": "module",
-  "description": "PeerGrading · 两个 AI 智能体互相审查、讨论、修改的协作循环（网站 + 桌面软件）",
+  "description": "PeerGrading · 本地与云端 AI 智能体互相审查、讨论、修改的开源协作循环",
   "scripts": {
-    "start": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env server.ts",
-    "dev": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env scripts/dev.mjs",
-    "grant": "node --no-warnings=ExperimentalWarning scripts/grant-entitlement.ts",
-    "confirm-order": "node --no-warnings=ExperimentalWarning scripts/confirm-order.ts",
-    "users": "node --no-warnings=ExperimentalWarning scripts/list-users.ts",
-    "bundle": "npm run bundle:payments && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "start": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env site-server.ts",
+    "dev": "npm run bundle && node --no-warnings=ExperimentalWarning --env-file-if-exists=.env scripts/dev.mjs",
+    "bundle": "npm run bundle:vendor && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs && esbuild site-server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/site-server.mjs",
+    "bundle:vendor": "esbuild web/app-vendor.ts --bundle --platform=browser --format=iife --minify --outfile=public/app-vendor.js",
     "desktop": "npm run bundle && node scripts/desktop.cjs",
-    "desktop:local-cloud": "npm run bundle && node scripts/desktop.cjs --local-cloud",
     "dist:mac": "npm run bundle && electron-builder --mac",
     "dist:win": "npm run bundle && electron-builder --win --x64 --arm64",
     "dist:all": "npm run bundle && electron-builder --mac --win --x64 --arm64",
     "test": "node --test test/*.test.ts",
-    "bundle:payments": "esbuild web/payment-sdk.ts --bundle --platform=browser --format=iife --minify --outfile=public/payment-sdk.js"
+    "check:open-source": "node scripts/check-open-source.mjs"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
-    "@airwallex/components-sdk": "^1.35.2",
     "@anthropic-ai/sdk": "^0.133.0",
-    "cookie-parser": "^1.4.7",
+    "dompurify": "^3.1.6",
     "express": "^4.22.3",
-    "google-auth-library": "^9.15.1",
-    "nodemailer": "^10.1.1",
-    "qrcode": "^1.5.4",
+    "marked": "^12.0.2",
     "shell-quote": "^1.12.0",
     "smol-toml": "^1.9.1",
     "undici": "^8.12.2"
@@ -55,6 +55,7 @@
       "agents/**",
       "finalizer/**",
       "package.json",
+      "LICENSE",
       "!**/*.map"
     ],
     "mac": {

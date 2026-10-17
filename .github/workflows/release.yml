@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: win
+            arch_flag: --x64
+            platform: windows
+            arch: x64
+            extension: exe
+          - runner: windows-latest
+            target: win
+            arch_flag: --arm64
+            platform: windows
+            arch: arm64
+            extension: exe
+          - runner: macos-latest
+            target: mac
+            arch_flag: --x64
+            platform: macos
+            arch: x64
+            extension: dmg
+          - runner: macos-latest
+            target: mac
+            arch_flag: --arm64
+            platform: macos
+            arch: arm64
+            extension: dmg
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check tag and package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          EXPECTED_VERSION="$version" node -e 'const pkg = require("./package.json"); if (pkg.version !== process.env.EXPECTED_VERSION) { console.error(`Tag version ${process.env.EXPECTED_VERSION} does not match package.json ${pkg.version}`); process.exit(1); }'
+      - name: Build shared bundles
+        run: npm run bundle
+      - name: Configure macOS signing and notarization from available credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          echo 'CSC_IDENTITY_AUTO_DISCOVERY=false' >> "$GITHUB_ENV"
+          echo 'MAC_NOTARIZE=false' >> "$GITHUB_ENV"
+
+          if [ -n "$CSC_LINK" ]; then
+            echo 'CSC_IDENTITY_AUTO_DISCOVERY=true' >> "$GITHUB_ENV"
+          else
+            echo '::warning::No Developer ID certificate secret; this macOS asset will be unsigned.'
+          fi
+
+          notarization_ready=0
+          if [ -n "$APPLE_API_KEY" ] || [ -n "$APPLE_API_KEY_ID" ] || [ -n "$APPLE_API_ISSUER" ]; then
+            if [ -z "$APPLE_API_KEY" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_ISSUER" ]; then
+              echo '::error::APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER must be provided together.'
+              exit 1
+            fi
+            printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/PeerGrading-AuthKey.p8"
+            chmod 600 "$RUNNER_TEMP/PeerGrading-AuthKey.p8"
+            echo "APPLE_API_KEY=$RUNNER_TEMP/PeerGrading-AuthKey.p8" >> "$GITHUB_ENV"
+            notarization_ready=1
+          elif [ -n "$APPLE_ID" ] || [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -n "$APPLE_TEAM_ID" ]; then
+            if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+              echo '::error::APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID must be provided together.'
+              exit 1
+            fi
+            notarization_ready=1
+          fi
+
+          if [ "$notarization_ready" -eq 1 ]; then
+            if [ -z "$CSC_LINK" ]; then
+              echo '::error::Notarization credentials require a Developer ID certificate in CSC_LINK.'
+              exit 1
+            fi
+            echo 'MAC_NOTARIZE=true' >> "$GITHUB_ENV"
+          else
+            echo '::warning::No complete notarization credential set; this macOS asset will not be notarized.'
+          fi
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx electron-builder --win "${{ matrix.arch_flag }}" --publish never \
+            --config.directories.output="release/${{ matrix.platform }}-${{ matrix.arch }}"
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          npx electron-builder --mac "${{ matrix.arch_flag }}" --publish never \
+            --config.directories.output="release/${{ matrix.platform }}-${{ matrix.arch }}" \
+            --config.mac.target=dmg --config.mac.notarize="$MAC_NOTARIZE"
+      - name: Stage installer with an explicit OS and architecture name
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          output="release/${{ matrix.platform }}-${{ matrix.arch }}"
+          mapfile -t installers < <(find "$output" -maxdepth 1 -type f -name "*.${{ matrix.extension }}")
+          if [ "${#installers[@]}" -ne 1 ]; then
+            echo "Expected exactly one .${{ matrix.extension }} installer in $output, found ${#installers[@]}"
+            exit 1
+          fi
+          mkdir -p artifacts
+          asset="PeerGrading-${version}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}"
+          cp "${installers[0]}" "artifacts/$asset"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peergrading-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify all targets and create SHA-256 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t installers < <(find release-assets -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
+          if [ "${#installers[@]}" -ne 4 ]; then
+            echo "Expected four installers, found ${#installers[@]}"
+            exit 1
+          fi
+          (cd release-assets && sha256sum ./*.dmg ./*.exe > SHA256SUMS)
+          cat release-assets/SHA256SUMS
+      - name: Publish GitHub Release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | sort)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --title "PeerGrading ${tag#v}" \
+              --notes "MIT open-source, local-first desktop release. Verify installers with SHA256SUMS. macOS signing and notarization are only applied when the corresponding build credentials are present; no unsigned or unnotarized asset is claimed to be signed or notarized."
+          fi

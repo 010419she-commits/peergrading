@@ -1,12 +1,17 @@
-# 推送到 main 时自动部署到服务器：GitHub 的机器拉取代码 → rsync 到服务器 → 重建容器。
-# 需要在仓库 Settings → Secrets and variables → Actions 里添加三个 secret：
-#   DEPLOY_HOST = 66.42.99.212   DEPLOY_USER = root   DEPLOY_SSH_KEY = deploy/keys/github-actions 文件的全部内容（私钥）
-name: Deploy to peergrading.ai
+name: Deploy public download site
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
-concurrency: deploy-production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -21,31 +26,61 @@ jobs:
           npm ci
           npm test
           npm run bundle
+          test -f dist/site-server.mjs
+      - name: Open-source safety check (when provided)
+        if: hashFiles('scripts/check-open-source.mjs') != ''
+        run: node scripts/check-open-source.mjs
       - name: Prepare SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-      - name: Sync code to server
+      - name: Sync public site source to server
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
             --exclude node_modules --exclude .git --exclude release --exclude dist \
-            --exclude data --exclude sessions --exclude downloads --exclude .env \
-            --exclude deploy/keys --exclude migration --exclude .DS_Store \
+            --exclude data --exclude sessions --exclude downloads \
+            --exclude handoff --exclude migration --exclude secrets \
+            --exclude .env --exclude .env.local --exclude .env.production \
+            --exclude deploy/keys --exclude .DS_Store \
             --exclude /peergrading/ --exclude __MACOSX --exclude /换电脑先读.txt \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/srv/peergrading/"
-      - name: Rebuild and restart
+      - name: Rebuild and restart public site
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes "$DEPLOY_USER@$DEPLOY_HOST" 'bash /srv/peergrading/deploy/deploy.sh'
-      - name: Smoke test
+      - name: Smoke test public downloads and removed legacy APIs
         run: |
-          sleep 8
-          curl -fsS -o /dev/null -w "https://peergrading.ai -> %{http_code}\n" https://peergrading.ai/
+          set -euo pipefail
+          base="https://peergrading.ai"
+          curl -fsS --retry 10 --retry-delay 5 --retry-connrefused -o /dev/null "$base/"
+          curl -fsS --retry 3 --retry-delay 2 "$base/installers.json" | node -e '
+            let body = "";
+            process.stdin.on("data", chunk => { body += chunk; });
+            process.stdin.on("end", () => {
+              const value = JSON.parse(body);
+              if (!value || typeof value !== "object") {
+                throw new Error("installers.json must be a JSON object or array");
+              }
+            });
+          '
+          expect_404() {
+            method="$1"
+            path="$2"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" "$base$path")"
+            if [ "$code" != "404" ]; then
+              echo "Expected $method $path to return 404, got $code"
+              return 1
+            fi
+          }
+          expect_404 GET /api/download/latest
+          expect_404 POST /api/device/start

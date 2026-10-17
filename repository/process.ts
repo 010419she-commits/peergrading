@@ -32,15 +32,29 @@ export function stopRepositoryProcess(child: ChildProcess, signal: NodeJS.Signal
   try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch {} }
 }
 
-export interface ProcessResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
-export function runRepositoryProcess(argv: string[], cwd: string, opts: { signal?: AbortSignal; timeoutMs?: number; maxOutput?: number } = {}): Promise<ProcessResult> {
+export interface ProcessResult {
+  code: number | null; stdout: string; stderr: string; timedOut: boolean;
+  stdoutTruncated?: boolean; stderrTruncated?: boolean;
+}
+
+/** Keep log tails without allocating an intermediate string larger than the limit. */
+function appendTail(current: string, chunk: string, max: number): string {
+  if (!max) return "";
+  if (chunk.length >= max) return chunk.slice(-max);
+  const overflow = current.length + chunk.length - max;
+  return (overflow > 0 ? current.slice(overflow) : current) + chunk;
+}
+
+export function runRepositoryProcess(argv: string[], cwd: string, opts: { signal?: AbortSignal; timeoutMs?: number; maxOutput?: number; outputMode?: "strict" | "tail" } = {}): Promise<ProcessResult> {
   assertActive(opts.signal);
   if (!argv.length || argv.some((arg) => typeof arg !== "string" || arg.includes("\0"))) throw new Error("校验命令必须是非空的 argv 字符串数组");
+  const max = opts.maxOutput ?? 2_000_000;
+  if (!Number.isSafeInteger(max) || max < 0) throw new Error("命令输出限制必须是非负安全整数");
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
     try { child = spawnRepositoryProcess(argv[0], argv.slice(1), cwd); } catch (e) { reject(e); return; }
-    let stdout = "", stderr = "", timedOut = false, outputExceeded = false, escalation: ReturnType<typeof setTimeout> | undefined;
-    const max = opts.maxOutput ?? 2_000_000;
+    let stdout = "", stderr = "", timedOut = false, outputExceeded = false, stdoutTruncated = false, stderrTruncated = false;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
     const terminate = () => {
       stopRepositoryProcess(child);
       escalation ??= setTimeout(() => stopRepositoryProcess(child, "SIGKILL"), 1000);
@@ -54,14 +68,26 @@ export function runRepositoryProcess(argv: string[], cwd: string, opts: { signal
       if (escalation) { stopRepositoryProcess(child, "SIGKILL"); clearTimeout(escalation); }
       opts.signal?.removeEventListener("abort", terminate);
     };
-    child.stdout!.on("data", (d) => { stdout += d; if (stdout.length > max) { stdout = stdout.slice(0, max); outputExceeded = true; terminate(); } });
-    child.stderr!.on("data", (d) => { stderr = (stderr + d).slice(-max); });
+    child.stdout!.on("data", (chunk: string) => {
+      if (opts.outputMode === "tail") {
+        if (stdout.length + chunk.length > max) stdoutTruncated = true;
+        stdout = appendTail(stdout, chunk, max);
+      } else if (!outputExceeded) {
+        const remaining = max - stdout.length;
+        stdout += chunk.slice(0, remaining);
+        if (chunk.length > remaining) { outputExceeded = true; terminate(); }
+      }
+    });
+    child.stderr!.on("data", (chunk: string) => {
+      if (stderr.length + chunk.length > max) stderrTruncated = true;
+      stderr = appendTail(stderr, chunk, max);
+    });
     child.once("error", (e) => { cleanup(); reject(e); });
     child.once("close", (code) => {
       cleanup(); if (!WIN) stopRepositoryProcess(child, "SIGKILL");
       if (opts.signal?.aborted) reject(abortError());
       else if (outputExceeded) reject(new Error("命令输出超过安全大小限制，任务已停止"));
-      else resolve({ code, stdout, stderr, timedOut });
+      else resolve({ code, stdout, stderr, timedOut, ...(stdoutTruncated ? { stdoutTruncated: true } : {}), ...(stderrTruncated ? { stderrTruncated: true } : {}) });
     });
     child.stdin!.end();
     if (opts.signal?.aborted) terminate();

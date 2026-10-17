@@ -2,59 +2,41 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">
-  <meta name="description" content="PeerGrading 隐私政策：账号、设备授权、本机仓库与第三方 AI 服务的数据处理，以及查询、更正和删除渠道。">
-  <title>隐私政策 · PeerGrading</title><link rel="stylesheet" href="/legal.css">
+  <meta name="description" content="PeerGrading 隐私说明：开源软件、本机数据、第三方模型服务与公网下载站的数据边界。">
+  <title>隐私说明 · PeerGrading</title><link rel="stylesheet" href="/legal.css">
 </head>
 <body>
   <a class="skip" href="#content">跳转到正文</a>
-  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="政策导航"><a href="/terms">服务条款</a><a href="mailto:010419She@gmail.com">联系我们</a></nav></header>
+  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="政策导航"><a href="/terms">服务条款</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">问题反馈</a></nav></header>
   <main id="content" class="legal-main">
-    <p class="eyebrow">PRIVACY / 隐私与数据</p><h1>隐私政策</h1>
-    <p class="meta">更新及生效日期：2026 年 10 月 16 日</p>
-    <p class="intro">本政策适用于 peergrading.ai 网站及 PeerGrading 桌面软件。运营者及个人信息处理者为<strong>王国珺</strong>（下称“我们”），联系邮箱为 <a href="mailto:010419She@gmail.com">010419She@gmail.com</a>。</p>
-    <aside class="notice" aria-label="重要信息"><strong>请先了解数据去向。</strong>仓库协作在您的电脑上运行，PeerGrading 账号服务器不因您选择本机仓库而自动接收整份仓库。所选云端 Agent 仍可能将任务、代码片段、差异和工具结果发送给其模型服务商；“本机运行 CLI”不代表模型在本机推理。账号服务器目前部署在<strong>美国洛杉矶地区</strong>。</aside>
-    <nav class="contents" aria-label="目录"><a href="#data">信息与用途</a><a href="#agents">代码与 AI</a><a href="#sharing">第三方与跨境</a><a href="#retention">保存与安全</a><a href="#rights">您的权利</a></nav>
-    <section id="data"><h2>一、处理哪些信息，为什么处理</h2>
-      <dl>
-        <dt>账号与身份验证</dt><dd>邮箱登录会处理您的邮箱、验证码校验记录及必要的防滥用信息，验证码以校验值保存。Google 或 GitHub 登录会返回账号标识及授权范围内的昵称、头像等基本资料，用于创建、识别或关联 PeerGrading 账号。Google 登录申请基本身份、邮箱和资料范围；当前 GitHub 登录只申请基本用户资料权限，不申请仓库权限，也不持久保存 GitHub 访问令牌。可用渠道以页面为准；历史微信账号关联记录可能为维护既有账号而保留。</dd>
-        <dt>设备、使用权与交易</dt><dd>我们处理用户 ID、设备名称、设备授权、登录及最近连接时间、试用和会员状态、协作次数、订单号、方案、金额、币种、付款状态、交易标识及邀请关系，用于登录、使用权核验、履行订单、奖励、防欺诈和售后。设备名称可能包含电脑主机名，您可在系统设置中调整。完整银行卡号和安全码由支付机构的托管收银台处理，PeerGrading 不要求您通过邮件或聊天提供这些信息。</dd>
-        <dt>任务及协作记录</dt><dd>桌面模式的任务、Agent 对话、代码差异、检查输出、版本、补丁、媒体和报告保存在本机应用数据目录或任务 worktree。账号服务器通过使用权接口核验权益与次数，不通过该接口上传任务正文或本机仓库。如您使用另行启用的网页版工作台、主动上传资料或提交故障日志，相应内容会在该服务器或支持渠道处理。</dd>
-        <dt>本机配置及剪贴板</dt><dd>软件识别已安装的 Agent 和必要的登录状态，调用您配置的 CLI 或接口。使用剪贴板中转时，软件会在该协作过程中读写剪贴板并切换指定应用。接口直连及媒体生成使用您主动配置的 API Key；桌面模式的相应配置保存在本机，云端模式的相应配置保存在运行该服务的服务器。不要将密钥粘贴到任务正文。</dd>
-        <dt>网络、安全与偏好</dt><dd>必要的访问与安全记录可能包含 IP 地址、请求时间和路径、响应状态、浏览器及系统信息。验证码接口使用经处理的邮箱、IP 等限流标识。必要 Cookie 用于浏览器识别、登录及安全校验，本地存储用于语言偏好；邀请链接可能用 Cookie 暂存邀请码。当前服务页面没有部署广告定向跟踪。</dd>
-      </dl>
-      <p>我们依具体场景，为订立和履行服务合同、履行法定义务，或在取得所需同意后处理信息；安全措施限于必要范围。拒绝提供登录或交易所必需的信息可能使对应功能无法使用，但不影响浏览公开介绍及政策。可选媒体生成与剪贴板中转仅在您使用相应功能时处理相关内容。</p>
+    <p class="eyebrow">PRIVACY / 隐私与数据</p><h1>隐私说明</h1>
+    <p class="meta">更新及生效日期：2026 年 10 月 17 日</p>
+    <p class="intro">本说明适用于 PeerGrading 开源桌面软件和 peergrading.ai 下载站。PeerGrading 不提供账号、会员、订单或支付系统，也不要求您创建账号。</p>
+    <aside class="notice" aria-label="重要信息"><strong>本地优先不等于所有数据都留在本机。</strong>任务、会话和模型配置默认保存在您的电脑上；只有您主动选择云端 Agent 或云端模型时，相关任务、代码、成果和讨论才会发送给对应服务商。</aside>
+    <nav class="contents" aria-label="目录"><a href="#local">本机数据</a><a href="#cloud">第三方服务</a><a href="#website">下载站</a><a href="#retention">保存与删除</a><a href="#contact">问题反馈</a></nav>
+    <section id="local"><h2>一、本机数据与您的控制</h2>
+      <p>桌面软件在本机保存任务、Agent 对话、版本、补丁、检查输出、媒体、运行报告以及您选择的模型连接。API Key 仅用于调用对应模型服务，保存在本机数据目录，不进入公开会话、安装包或 GitHub 源码。</p>
+      <p>仓库协作从您选择的 Git 仓库创建独立任务分支和 worktree。软件不会仅因您选择仓库就把整份仓库上传到 PeerGrading 下载站，也不会自动合并或推送原始仓库。</p>
+      <p>使用剪贴板中转时，软件会在该协作过程中读写剪贴板并切换您指定的应用。语言偏好仅使用浏览器或应用的本机存储，不需要账号 Cookie。</p>
     </section>
-    <section id="agents"><h2>二、代码、AI 服务与您的选择</h2>
-      <p>选择 Kimi Code、Codex、Claude Code 或其他云端 Agent 后，本机 CLI 或所选接口会将任务及所需上下文发送给对应服务商。服务商可能处理提示词、代码、文件、工具结果、使用量与输出；其保存期限、训练使用方式和退出选项受其政策、账号方案及您的设置约束。我们不能承诺第三方不保存数据或不用于训练。</p>
-      <p>LM Studio、Ollama 等服务的数据去向取决于模型和接口地址；接口或工具若连接外部服务，数据仍可能离开本机。运行前请核对所选 Agent、接口、权限和提供代码的授权，避免提交密钥、无关个人信息或无权提供的保密资料。</p>
-      <p>仓库协作在独立任务分支及 worktree 中修改文件并执行配置的检查，不自动合并或推送到远程仓库。Agent 工具和检查命令可能访问网络。删除 PeerGrading 记录不会自动删除第三方已保存的内容或原始仓库文件。</p>
+    <section id="cloud"><h2>二、第三方 Agent 与模型服务</h2>
+      <p>Kimi Code、Codex、Claude Code、Kimi、OpenAI、Anthropic 以及您配置的其他接口会按其服务规则处理提示词、代码、差异、工具结果、使用量和输出。即使 CLI 在本机运行，也不代表模型在本机推理。</p>
+      <p>Ollama、LM Studio、NInfer、Strata 或其他本地兼容接口的数据去向取决于实际地址；如果接口指向局域网或公网，内容仍可能离开您的电脑。第三方服务的保存期限、训练使用、费用和退出选项由其政策与您的设置决定。</p>
+      <p>请只提交您有权使用的代码和内容，不要把密码、API Key、私钥、无关个人信息或保密资料放入任务正文、日志、截图或 GitHub issue。</p>
     </section>
-    <section id="sharing"><h2>三、第三方服务与跨境处理</h2>
-      <p>以下服务仅在相关功能被实际使用时处理所需信息：</p>
-      <ul>
-        <li><strong>登录与邮件：</strong>Google、GitHub 提供您选择的登录；验证码由实际配置的 SMTP 邮件服务或 Resend 发送，处理收件地址和验证码邮件。头像可能从授权平台的外部地址加载。</li>
-        <li><strong>AI 与媒体：</strong>Moonshot / Kimi、OpenAI、Anthropic 或您配置的其他服务处理任务上下文和生成请求；媒体功能需另行启用。</li>
-        <li><strong>支付：</strong>开通后由微信支付、Airwallex 等机构处理相关订单、交易及支付核验信息；支付机构另行收集的付款信息以收银台说明为准。</li>
-        <li><strong>托管与网络资源：</strong>账号服务器及基础设施服务商处理网站、账号功能所需的数据。官网或工作台加载的 Google Fonts 字体、Cloudflare cdnjs 资源会向对应服务提供必要网络请求信息。本政策与条款页面仅加载本站样式。</li>
-      </ul>
-      <p>账号、设备及订单的云端数据目前在<strong>美国洛杉矶地区</strong>处理和保存；登录、邮件、支付或 AI 服务可能在其他国家或地区处理数据。您可通过本页邮箱询问相关处理活动和行使权利。跨境提供、敏感信息等场景依法需要的额外告知、单独同意及其他程序，应另行履行；本政策不替代法定单独同意。</p>
-      <p>我们不出售您的个人信息。仅为实现所选功能、取得您授权、依法履行义务、应对安全事件或处理争议所必需时向相应接收方提供信息。第三方独立服务适用其自身政策。</p>
+    <section id="website"><h2>三、公网下载站</h2>
+      <p>下载站只提供项目介绍、开源链接、隐私与条款页面以及 GitHub Releases 安装包清单，不提供协作工作台、服务器仓库操作、账号、支付或旧版兼容 API。</p>
+      <p>网站不加载 Google Fonts、第三方 JS CDN、广告或行为分析脚本。访问 GitHub 源码、issue 或 Release 时，GitHub 按其隐私政策处理您的请求。</p>
+      <p>托管和反向代理可能为安全、故障排查和防止滥用处理 IP 地址、请求时间、路径、响应状态及浏览器信息。本站不通过账号体系把这些技术记录关联到特定用户。</p>
     </section>
-    <section id="retention"><h2>四、保存期限与安全</h2>
-      <p>账号、设备、会员及订单数据在提供服务、处理售后与履行法定义务所必要的期间保存；不再需要且没有法定保留理由时删除或匿名化。交易及争议记录按适用法定期限处理，不因退出登录立即删除。</p>
-      <p>当前登录会话通常有效 30 天，验证码和设备连接码通常有效 10 分钟，浏览器识别 Cookie 最长约 1 年，邀请 Cookie 通常为 30 天。“失效”不等于数据库记录同时物理删除，过期认证事务由清理流程移除。您可在浏览器清除 Cookie；禁用必要 Cookie 可能影响登录和验证。</p>
-      <p>本机协作记录、媒体及任务 worktree 当前没有统一的自动到期清理机制，请按需备份或删除。退出或卸载软件不保证清除应用数据目录及 worktree。服务器协作记录如存在，可申请删除。备份随替换或清理处理；依法应保留或技术上暂不能立即删除的数据，限制为必要保存与安全用途。</p>
-      <p>我们采用 HTTPS、访问控制、会话及设备令牌校验、防跨站请求伪造校验、必要权限和本机凭证文件权限等措施。没有系统能保证绝对安全，请保护电脑、账号、CLI 登录及私人备份。发生依法需要通知的信息安全事件时，我们会依法补救及通知。</p>
+    <section id="retention"><h2>四、保存期限与删除</h2>
+      <p>本机协作记录、媒体、模型配置和任务 worktree 没有统一的自动到期清理机制，由您自行备份或删除。退出或卸载软件不保证清除这些目录。</p>
+      <p>公网技术日志由托管环境按安全和运维需要限定保存期限。PeerGrading 不保存账号数据库、设备令牌、会员、订单或支付记录，因此不存在对应的云端注销或删除流程。</p>
+      <p>我们采取回环地址限制、Host / Origin / CSRF 校验、配置脱敏和开源发布前秘密扫描等措施。没有系统能保证绝对安全，请同时保护电脑、CLI 登录、API Key 和私人备份。</p>
     </section>
-    <section id="rights"><h2>五、访问、更正、撤回与删除</h2>
-      <p>软件“账号与会员”可查看账号、会员、订单及设备，解除设备连接，并在必要验证后管理关联登录方式。退出软件连接不等于注销云端账号。</p>
-      <p>查询或复制信息、更正资料、撤回同意、注销账号、删除数据或提出异议，请联系 <a href="mailto:010419She@gmail.com">010419She@gmail.com</a>，说明请求及可定位账号的信息。请勿发送密码、验证码、API Key 或完整银行卡信息。我们会合理核验身份，按适用法定期限处理；无法满足全部请求时说明合法理由及可行替代方式。依法保留的交易、争议记录不一定能立即删除。</p>
-      <p>撤回同意不影响撤回前合法处理；删除或注销可能使相关功能无法继续。第三方平台保存的信息需要向其另行申请。您仍可依法向有权机关投诉或寻求救济。</p>
-    </section>
-    <section><h2>六、未成年人、更新与联系</h2>
-      <p>PeerGrading 主要面向能独立管理开发项目和账号的用户，不主动面向未满 14 周岁的儿童提供服务或收集信息。监护人发现儿童未经适当授权提供信息时，请联系我们处理。</p>
-      <p>政策或处理目的、信息种类、接收方发生实质变化时，我们会更新日期并作适当提示；需重新取得同意时，不以单纯更新本页代替。您可保存本政策供查阅。</p>
-      <p><strong>运营者：王国珺</strong><br>隐私及服务联系：<a href="mailto:010419She@gmail.com">010419She@gmail.com</a><br>官方网站：<a href="https://peergrading.ai">peergrading.ai</a></p>
+    <section id="contact"><h2>五、问题反馈与政策更新</h2>
+      <p>如需报告实现问题或讨论本机数据功能，请通过 <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issue</a> 提交。公开反馈前请移除密钥、私人代码、账号信息和不必要的个人数据。</p>
+      <p>本说明发生实质变化时会更新日期并在项目页面展示。历史版本可通过公开仓库核对。您可保存本页供查阅。</p>
     </section>
     <footer class="legal-footer"><a href="/">返回首页</a><a href="/terms">服务条款</a><a href="#content">回到顶部</a></footer>
   </main>

@@ -66,20 +66,19 @@ async function fixWindowsPath() {
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); s.on("error", reject); });
 const waitFor = (url, ms = 15000) => new Promise((resolve, reject) => { const t0 = Date.now(); (function tick() { fetch(url).then((r) => (r.ok ? resolve() : retry())).catch(retry); function retry() { Date.now() - t0 > ms ? reject(new Error("服务未启动")) : setTimeout(tick, 200); } })(); });
 
-let win, accountWin;
+let win;
 async function start() {
   await fixPath();
   const userData = app.getPath("userData");
   process.env.LOCAL_MODE = "1";
+  process.env.SCAN_MODELS ??= "1";
   process.env.DATA_DIR = path.join(userData, "data");
   process.env.SESSIONS_DIR = path.join(userData, "sessions");
-  process.env.CLOUD_URL = process.env.CLOUD_URL || "https://peergrading.ai";
   process.env.PORT = String(await freePort());
   process.env.HOST = "127.0.0.1";
-  process.env.BASE_URL = `http://127.0.0.1:${process.env.PORT}`;   // 窗口打开的就是这个地址，CSRF 的同源判断以它为准
   await import(pathToFileURL(path.join(__dirname, "..", "dist", "server.mjs")).href);
   const base = `http://127.0.0.1:${process.env.PORT}`;
-  await waitFor(`${base}/api/auth/bootstrap`);
+  await waitFor(`${base}/api/bootstrap`);
 
   win = new BrowserWindow({
     width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: "#10141b", title: "PeerGrading",
@@ -106,40 +105,13 @@ async function start() {
     });
   };
   const trusted = (event) => {
-    const owner = [win, accountWin].find((window) => window && !window.isDestroyed() && event.sender === window.webContents);
-    if (!owner || event.senderFrame !== owner.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw new Error("Invalid window");
+    if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw new Error("Invalid window");
   };
   guardWindow(win);
   win.on("closed", () => { win = null; });
-  for (const channel of ["peergrading:open-account", "peergrading:enter-workspace", "peergrading:open-external"]) ipcMain.removeHandler(channel);
+  ipcMain.removeHandler("peergrading:open-external");
   ipcMain.handle("peergrading:open-external", async (event, url) => { trusted(event); await openExternal(String(url)); });
-  ipcMain.handle("peergrading:open-account", async (event, section) => {
-    trusted(event);
-    const hash = ["#pricing", "#referral", "#security"].includes(section) ? section : "";
-    if (accountWin && !accountWin.isDestroyed()) { accountWin.show(); accountWin.focus(); return; }
-    accountWin = new BrowserWindow({
-      parent: win, width: 1120, height: 830, minWidth: 820, minHeight: 640, title: "账号与会员 · PeerGrading", backgroundColor: "#11100f",
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.cjs") },
-    });
-    guardWindow(accountWin);
-    accountWin.on("closed", () => { accountWin = null; });
-    await accountWin.loadURL(`${base}/account${hash}`);
-  });
-  ipcMain.handle("peergrading:enter-workspace", async (event) => {
-    trusted(event);
-    if (new URL(win.webContents.getURL()).pathname !== "/app") await win.loadURL(`${base}/app`);
-    accountWin?.close(); win.show(); win.focus();
-  });
-  process.on("peergrading:auth-complete", () => {
-    if (!win || win.isDestroyed()) return;
-    if (new URL(win.webContents.getURL()).pathname !== "/app") win.loadURL(`${base}/app`).catch(console.error);
-    accountWin?.close(); win.show(); win.focus();
-  });
-  process.on("peergrading:auth-logout", () => {
-    accountWin?.close();
-    if (win && !win.isDestroyed()) win.loadURL(`${base}/account`).catch(console.error);
-  });
-  await win.loadURL(`${base}/`);
+  await win.loadURL(`${base}/app`);
 }
 
 Menu.setApplicationMenu(Menu.buildFromTemplate([

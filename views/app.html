@@ -3,10 +3,8 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><meta name="robots" content="noindex">
 <title>PeerGrading</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500&display=swap">
 <link rel="stylesheet" href="/style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="/app-vendor.js"></script>
 <script src="/i18n.js"></script>
 </head>
 <body>
@@ -15,9 +13,8 @@
     <a class="brand-mini" href="/"><span class="brand-name" data-i18n="appTitle"></span></a>
     <span class="sub" data-i18n="subtitle"></span>
     <div class="right">
-      <span class="access" id="access-badge"></span>
-      <a class="tb-link" href="/account" data-i18n="accountLink"></a>
-      <button class="tb-link" id="logout-btn" type="button" data-i18n="logoutLink"></button>
+      <span class="local-first-badge" data-i18n="localFirstBadge"></span>
+      <a class="tb-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceLink"></a>
       <div class="seg" id="lang-seg"><button data-lang="zh">中文</button><button data-lang="en">English</button></div>
     </div>
   </div>
@@ -37,9 +34,10 @@
       <div class="group" data-i18n="task"></div>
       <textarea id="task" rows="6" data-i18n-ph="taskPh"></textarea>
       <div class="group" data-i18n="agents"></div>
+      <button class="btn sm" id="manage-api-models" type="button" data-i18n="apiModelsAdd" hidden></button>
       <div class="slot A" data-slot="A">
         <h3 data-i18n="slotA"></h3>
-        <div class="pick" id="pick-A"></div>
+        <div class="pick" id="pick-A" role="button" tabindex="0"></div>
         <label data-i18n="name"></label><input id="name-A" value="Agent A">
         <label data-i18n="persona"></label><textarea id="persona-A" rows="2" data-i18n-ph="personaPhA"></textarea>
         <div class="effort-row" id="effort-row-A" hidden><label data-i18n="effort"></label><select id="effort-A"></select></div>
@@ -47,34 +45,45 @@
       </div>
       <div class="slot B" data-slot="B">
         <h3 data-i18n="slotB"></h3>
-        <div class="pick" id="pick-B"></div>
+        <div class="pick" id="pick-B" role="button" tabindex="0"></div>
         <label data-i18n="name"></label><input id="name-B" value="Agent B">
         <label data-i18n="persona"></label><textarea id="persona-B" rows="2" data-i18n-ph="personaPhB"></textarea>
         <div class="effort-row" id="effort-row-B" hidden><label data-i18n="effort"></label><select id="effort-B"></select></div>
         <div class="app-row" id="app-row-B" hidden><label data-i18n="targetApp"></label><input id="app-B" list="apps" data-i18n-ph="targetAppPh"></div>
       </div>
-      <div class="group" data-i18n="settings"></div>
-      <div class="row">
-        <div><label data-i18n="rounds"></label><input id="rounds" type="number" min="1" max="10" value="3"></div>
-        <div><label data-i18n="turns"></label><input id="turns" type="number" min="1" max="3" value="1"></div>
-      </div>
-      <div class="group" data-i18n="mediaTitle"></div>
-      <div class="media-opts">
-        <label class="check"><input type="checkbox" id="media-images"><span data-i18n="mediaImages"></span></label>
-        <label class="check"><input type="checkbox" id="media-videos"><span data-i18n="mediaVideos"></span></label>
-        <div class="hint" id="media-hint"></div>
-        <details id="media-config" hidden>
-          <summary data-i18n="mediaConfig"></summary>
-          <label data-i18n="mediaKey"></label><input id="media-key" type="password" autocomplete="off" spellcheck="false">
-          <label data-i18n="mediaBase"></label><input id="media-base" spellcheck="false">
+      <details class="advanced-settings">
+        <summary data-i18n="advancedSettings"></summary>
+        <div class="advanced-settings-body">
+          <div class="group" data-i18n="settings"></div>
           <div class="row">
-            <div><label data-i18n="mediaImageModel"></label><input id="media-image-model" spellcheck="false"></div>
-            <div><label data-i18n="mediaVideoModel"></label><input id="media-video-model" spellcheck="false"></div>
+            <div><label data-i18n="rounds"></label><input id="rounds" type="number" min="1" max="10" value="3"></div>
+            <div><label data-i18n="turns"></label><input id="turns" type="number" min="1" max="3" value="1"></div>
           </div>
-          <div class="row btns"><button class="btn sm primary" id="media-save" type="button" data-i18n="mediaSave"></button><button class="btn sm" id="media-clear" type="button" data-i18n="mediaClear"></button></div>
-          <div class="hint" id="media-msg"></div>
-        </details>
-      </div>
+          <fieldset class="acceleration-settings" aria-describedby="acceleration-hint">
+            <legend data-i18n="accelerationTitle"></legend>
+            <p class="hint" id="acceleration-hint" data-i18n="accelerationHint"></p>
+            <label class="acceleration-option" for="acceleration-speculative-review"><input type="checkbox" id="acceleration-speculative-review" checked><span><strong data-i18n="speculativeReview"></strong><small data-i18n="speculativeReviewHint"></small></span></label>
+            <label class="acceleration-option" for="acceleration-cache"><input type="checkbox" id="acceleration-cache" checked><span><strong data-i18n="exactCache"></strong><small data-i18n="exactCacheHint"></small></span></label>
+          </fieldset>
+          <div class="group" data-i18n="mediaTitle"></div>
+          <div class="media-opts">
+            <label class="check"><input type="checkbox" id="media-images"><span data-i18n="mediaImages"></span></label>
+            <label class="check"><input type="checkbox" id="media-videos"><span data-i18n="mediaVideos"></span></label>
+            <div class="hint" id="media-hint"></div>
+            <details id="media-config" hidden>
+              <summary data-i18n="mediaConfig"></summary>
+              <label data-i18n="mediaKey"></label><input id="media-key" type="password" autocomplete="off" spellcheck="false">
+              <label data-i18n="mediaBase"></label><input id="media-base" spellcheck="false">
+              <div class="row">
+                <div><label data-i18n="mediaImageModel"></label><input id="media-image-model" spellcheck="false"></div>
+                <div><label data-i18n="mediaVideoModel"></label><input id="media-video-model" spellcheck="false"></div>
+              </div>
+              <div class="row btns"><button class="btn sm primary" id="media-save" type="button" data-i18n="mediaSave"></button><button class="btn sm" id="media-clear" type="button" data-i18n="mediaClear"></button></div>
+              <div class="hint" id="media-msg"></div>
+            </details>
+          </div>
+        </div>
+      </details>
       <div class="actions">
         <button class="btn primary" id="start" data-i18n="start"></button>
         <button class="btn" id="stop" data-i18n="stop" disabled></button>
@@ -83,7 +92,20 @@
       <div class="group" data-i18n="history"></div>
       <select id="history"></select>
     </aside>
-    <section class="main" id="timeline"></section>
+    <section class="main">
+      <section class="assist-status" id="assist-status" aria-live="polite" hidden>
+        <div class="assist-head"><h2 data-i18n="accelerationTitle"></h2><span class="tag" id="assist-phase"></span></div>
+        <p class="assist-copy" data-i18n="assistStatusHint"></p>
+        <dl class="assist-stats" id="assist-stats" hidden>
+          <div><dt data-i18n="assistStarted"></dt><dd id="assist-started">0</dd></div>
+          <div><dt data-i18n="assistAdopted"></dt><dd id="assist-adopted">0</dd></div>
+          <div><dt data-i18n="assistFallbacks"></dt><dd id="assist-fallbacks">0</dd></div>
+          <div><dt data-i18n="assistCacheHits"></dt><dd id="assist-cacheHits">0</dd></div>
+          <div><dt data-i18n="assistOverlap"></dt><dd id="assist-overlapMs">0 ms</dd></div>
+        </dl>
+      </section>
+      <div id="timeline"></div>
+    </section>
     <aside class="inspector">
       <div class="group" data-i18n="versions"></div>
       <div class="final" id="final"></div>
@@ -115,14 +137,47 @@
 </div>
 <datalist id="apps"></datalist>
 <div class="sheet-bg" id="sheet"><div class="sheet">
-  <header><h2 data-i18n="pickerTitle"></h2><button class="btn sm" id="refresh" data-i18n="refresh"></button><button class="btn sm" id="close-sheet">✕</button></header>
+  <header><h2 data-i18n="pickerTitle"></h2><button class="btn sm" id="refresh" type="button" data-i18n="refresh"></button><button class="btn sm" id="close-sheet" type="button">✕</button></header>
   <div class="hint" data-i18n="pickerHint"></div>
+  <details class="local-models api-models" id="api-models" hidden>
+    <summary data-i18n="apiModelsTitle"></summary>
+    <p class="hint" data-i18n="apiModelsHint"></p>
+    <div class="local-model-list" id="api-model-list"></div>
+    <form id="api-model-form" autocomplete="off">
+      <h3 id="api-model-form-title"></h3>
+      <div class="row">
+        <div><label for="api-model-provider" data-i18n="apiModelProvider"></label><select id="api-model-provider"></select></div>
+        <div><label for="api-model-name" data-i18n="apiModelName"></label><input id="api-model-name" maxlength="80" required spellcheck="false"></div>
+      </div>
+      <label for="api-model-base" data-i18n="apiModelBase"></label><input id="api-model-base" type="url" required spellcheck="false" placeholder="https://api.moonshot.cn/v1">
+      <label for="api-model-model" data-i18n="apiModelModel"></label><input id="api-model-model" maxlength="256" required spellcheck="false" placeholder="kimi-k2.6">
+      <p class="hint" id="api-model-model-hint"></p>
+      <label for="api-model-key" data-i18n="apiModelKey"></label><input id="api-model-key" type="password" autocomplete="new-password" spellcheck="false">
+      <p class="hint"><a id="api-model-key-link" target="_blank" rel="noopener noreferrer" data-i18n="apiModelGetKey"></a> <a id="api-model-docs-link" target="_blank" rel="noopener noreferrer" data-i18n="apiModelDocs"></a></p>
+      <div class="row btns"><button class="btn sm primary" type="submit" data-i18n="apiModelSave"></button><button class="btn sm" id="api-model-cancel" type="button" data-i18n="localModelCancel" hidden></button></div>
+    </form>
+    <p class="hint local-model-message" id="api-model-message" role="status" aria-live="polite"></p>
+  </details>
+  <details class="local-models" id="local-models" hidden>
+    <summary data-i18n="localModelsTitle"></summary>
+    <p class="hint" data-i18n="localModelsHint"></p>
+    <p class="hint" data-i18n="localModelsModeHint"></p>
+    <div class="local-model-list" id="local-model-list"></div>
+    <form id="local-model-form" autocomplete="off">
+      <h3 id="local-model-form-title"></h3>
+      <div class="row">
+        <div><label for="local-model-name" data-i18n="localModelName"></label><input id="local-model-name" list="local-model-presets" value="NInfer" maxlength="80" required spellcheck="false" data-i18n-ph="localModelNamePh"></div>
+        <div><label for="local-model-base" data-i18n="localModelBase"></label><input id="local-model-base" type="url" value="http://127.0.0.1:8080/v1" required spellcheck="false" placeholder="http://127.0.0.1:8080/v1"></div>
+      </div>
+      <datalist id="local-model-presets"><option value="NInfer"></option><option value="Strata"></option></datalist>
+      <label for="local-model-model" data-i18n="localModelModel"></label><input id="local-model-model" spellcheck="false" data-i18n-ph="localModelModelPh">
+      <label for="local-model-key" data-i18n="localModelKey"></label><input id="local-model-key" type="password" autocomplete="new-password" spellcheck="false">
+      <label class="check" id="local-model-clear-row" for="local-model-clear" hidden><input id="local-model-clear" type="checkbox"><span data-i18n="localModelClearKey"></span></label>
+      <div class="row btns"><button class="btn sm primary" id="local-model-save" type="submit" data-i18n="localModelSave"></button><button class="btn sm" id="local-model-cancel" type="button" data-i18n="localModelCancel" hidden></button></div>
+    </form>
+    <p class="hint local-model-message" id="local-model-message" role="status" aria-live="polite"></p>
+  </details>
   <div class="cards" id="cards"></div>
-</div></div>
-<div class="sheet-bg" id="paywall"><div class="sheet small">
-  <header><h2 data-i18n="paywallTitle"></h2><button class="btn sm" id="close-paywall">✕</button></header>
-  <div class="hint" id="paywall-text"></div>
-  <div class="hint"><a class="btn primary" href="/account#pricing" data-i18n="paywallBtn"></a></div>
 </div></div>
 <script src="/app.js"></script>
 </body>

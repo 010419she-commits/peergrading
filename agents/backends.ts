@@ -5,7 +5,8 @@ import type { Backend, ChatRequest, ChatResult, RunnerSpec, Turn, Lang } from ".
 import { RelayBackend, type RelayContext } from "./relay.ts";
 import { getProxyEnv } from "./proxy.ts";
 import { WIN, launcherFor, spawnCli, killTree, stripNestedClaudeEnv } from "./launch.ts";
-import { assertActive, spawnRepositoryProcess, stopRepositoryProcess, repositoryEnv } from "../repository/process.ts";
+import { abortError, assertActive, spawnRepositoryProcess, stopRepositoryProcess, repositoryEnv } from "../repository/process.ts";
+import { readOpenAIResponseCache, writeOpenAIResponseCache } from "../acceleration.ts";
 
 function cleanEnv(): NodeJS.ProcessEnv {
   const env = stripNestedClaudeEnv();
@@ -229,46 +230,166 @@ class OpenAICompatBackend implements Backend {
   spec: Extract<RunnerSpec, { type: "openai" }>;
   constructor(spec: Extract<RunnerSpec, { type: "openai" }>) { this.spec = spec; }
 
+  private safeError(message: unknown): string {
+    const text = String(message);
+    return this.spec.apiKey ? text.replaceAll(this.spec.apiKey, "[redacted]") : text;
+  }
+
   async chat(req: ChatRequest): Promise<ChatResult> {
-    const res = await fetch(`${this.spec.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.spec.apiKey}` },
-      body: JSON.stringify({
-        model: this.spec.model,
-        stream: true,
-        messages: [{ role: "system", content: req.system }, ...req.turns.map((t) => ({ role: t.role, content: t.text }))],
-      }),
-      signal: req.signal,
-    });
-    if (!res.ok || !res.body) {
-      let msg = `${res.status} ${res.statusText}`;
-      try { const j = await res.json(); msg = j.error?.message ?? JSON.stringify(j); } catch {}
-      throw new Error(`本地模型服务返回错误：${msg}`);
-    }
-    const reader = res.body.getReader(); const dec = new TextDecoder();
-    let buf = "", text = "", model: string | undefined, reasoningChars = 0, lastProgress = 0;
-    while (true) {
-      const { value, done } = await reader.read(); if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        try {
-          const d = JSON.parse(payload);
-          if (d.model) model = d.model;
-          const delta = d.choices?.[0]?.delta?.content;
-          if (delta) { text += delta; req.onDelta(delta); }
-          const rc = d.choices?.[0]?.delta?.reasoning_content;
-          if (rc) { reasoningChars += rc.length; if (Date.now() - lastProgress > 1000) { lastProgress = Date.now(); req.onProgress?.({ phase: "reasoning", chars: reasoningChars }); } }
-          if (d.error) throw new Error(d.error.message ?? JSON.stringify(d.error));
-        } catch (e: any) { if (e?.message && !/JSON/.test(e.message)) throw e; }
+    assertActive(req.signal);
+    const timeoutMs = this.spec.timeoutMs ?? 900_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900_000) throw new Error("模型请求超时须在 1 毫秒至 15 分钟之间");
+    const wireBody = {
+      model: this.spec.model, stream: true,
+      messages: [{ role: "system", content: req.system }, ...req.turns.map((turn) => turn.role === "assistant" && turn.apiMessage
+        ? { role: "assistant", content: turn.apiMessage.content, ...(turn.apiMessage.reasoning_content !== undefined ? { reasoning_content: turn.apiMessage.reasoning_content } : {}) }
+        : { role: turn.role, content: turn.text })],
+    };
+    if (req.cache) {
+      const cached = readOpenAIResponseCache(this.spec, wireBody);
+      if (cached) {
+        for (const delta of cached.deltas) {
+          assertActive(req.signal);
+          req.onDelta(delta);
+          assertActive(req.signal);
+        }
+        assertActive(req.signal);
+        return cached.result;
       }
     }
-    if (!text) throw new Error("本地模型没有返回内容");
-    return { text, model };
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), timeoutMs); timer.unref();
+    const signal = AbortSignal.any([req.signal, deadline.signal]);
+    const maxResponse = 16 * 1024 * 1024, maxText = 2_000_000, maxEvent = 1_000_000;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const res = await fetch(`${this.spec.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST", redirect: "manual",
+        headers: { "Content-Type": "application/json", ...(this.spec.apiKey ? { Authorization: `Bearer ${this.spec.apiKey}` } : {}) },
+        // Leave sampling/token defaults to the provider: thinking models reject
+        // some otherwise valid OpenAI temperature/max_tokens combinations.
+        body: JSON.stringify(wireBody),
+        signal,
+      });
+      if (!res.body) throw new Error(`模型服务返回空响应（HTTP ${res.status}）`);
+      reader = res.body.getReader();
+      const dec = new TextDecoder();
+      if (!res.ok) {
+        // A proxy may return megabytes of HTML or an endless error body. Read
+        // only a bounded prefix, then release the connection in finally.
+        let body = "", bytes = 0;
+        while (bytes < 16_384) {
+          const { value, done } = await reader.read(); if (done) break;
+          const kept = value.subarray(0, 16_384 - bytes); bytes += kept.length;
+          body += dec.decode(kept, { stream: true });
+        }
+        body += dec.decode();
+        let message = body;
+        try { const data = JSON.parse(body); message = data.error?.message ?? data.message ?? body; } catch {}
+        throw new Error(`模型服务返回错误（HTTP ${res.status}）：${this.safeError(message).slice(0, 1000)}`);
+      }
+      let text = "", model: string | undefined, usage: ChatResult["usage"], reasoningText = "", hasReasoning = false, reasoningChars = 0, lastProgress = 0, pendingSecret = "";
+      let finished = false, doneMarker = false;
+      const deltas: string[] = [];
+      const emitContent = (content: string, final = false) => {
+        const key = this.spec.apiKey;
+        let visible = pendingSecret + content; pendingSecret = "";
+        if (key) {
+          // Hold an incomplete credential prefix across SSE chunks, so a key
+          // echoed in several deltas never enters session events or the UI.
+          let from = 0, found: number; const safe: string[] = [];
+          while ((found = visible.indexOf(key, from)) >= 0) { safe.push(visible.slice(from, found), "[redacted]"); from = found + key.length; }
+          let remainder = visible.slice(from);
+          if (!final) for (let length = Math.min(key.length - 1, remainder.length); length > 0; length--) {
+            if (remainder.endsWith(key.slice(0, length))) { pendingSecret = remainder.slice(-length); remainder = remainder.slice(0, -length); break; }
+          }
+          safe.push(remainder); visible = safe.join("");
+        }
+        if (text.length + visible.length > maxText) throw new Error("模型回复超过安全大小限制，任务已停止");
+        text += visible;
+        if (visible) { deltas.push(visible); req.onDelta(visible); }
+        signal.throwIfAborted();
+      };
+      const consume = (data: any) => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("模型服务返回了无效的响应对象");
+        if (data.error) throw new Error(`模型服务返回错误：${this.safeError(data.error.message ?? (typeof data.error === "string" ? data.error : JSON.stringify(data.error)))}`);
+        if (typeof data.model === "string") model = this.safeError(data.model);
+        if (Number.isFinite(data.usage?.prompt_tokens) && Number.isFinite(data.usage?.completion_tokens)) usage = { input: data.usage.prompt_tokens, output: data.usage.completion_tokens };
+        const choice = data.choices?.find((item: any) => item && (item.index === undefined || item.index === 0));
+        if (!choice) return;
+        if (choice.error || choice.error_msg) throw new Error(`模型服务返回错误：${this.safeError(JSON.stringify(choice.error ?? choice.error_msg))}`);
+        const message = choice.delta ?? choice.message;
+        const content = message?.content;
+        if (content !== undefined && content !== null && typeof content !== "string") throw new Error("模型回复 content 必须是文本字符串");
+        if (typeof content === "string") emitContent(content);
+        const reasoning = message?.reasoning_content;
+        if (typeof reasoning === "string") {
+          hasReasoning = true;
+          if (reasoningText.length + reasoning.length > maxText) throw new Error("模型推理记录超过安全大小限制，任务已停止");
+          reasoningText += reasoning;
+          reasoningChars += reasoning.length;
+          if (reasoning && Date.now() - lastProgress > 1000) { lastProgress = Date.now(); req.onProgress?.({ phase: "reasoning", chars: reasoningChars }); }
+        }
+        if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
+          if (choice.finish_reason !== "stop") throw new Error(`模型回复未正常完成（finish_reason: ${this.safeError(choice.finish_reason)}）`);
+          finished = true;
+        }
+      };
+      if ((res.headers.get("content-type") ?? "").toLowerCase().includes("json")) {
+        let body = "", bytes = 0;
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break;
+          bytes += value.length; if (bytes > maxResponse) throw new Error("模型响应超过安全大小限制，任务已停止");
+          body += dec.decode(value, { stream: true });
+        }
+        body += dec.decode();
+        let data; try { data = JSON.parse(body); } catch { throw new Error("模型服务返回了无效的 JSON 响应"); }
+        consume(data);
+      } else {
+        let buf = "", eventName = "", eventData: string[] = [], eventSize = 0, bytes = 0;
+        const dispatch = () => {
+          const payload = eventData.join("\n").trim(); eventData = []; eventSize = 0;
+          const name = eventName; eventName = "";
+          if (!payload) { if (name === "error") throw new Error("模型服务返回了流式错误"); return; }
+          if (payload === "[DONE]") { doneMarker = true; return; }
+          let data; try { data = JSON.parse(payload); } catch { throw new Error("模型服务返回了无效的流式 JSON 响应"); }
+          if (name === "error") throw new Error(`模型服务返回错误：${this.safeError(data.error?.message ?? data.message ?? payload)}`);
+          consume(data);
+        };
+        const line = (value: string) => {
+          if (value.endsWith("\r")) value = value.slice(0, -1);
+          if (!value) { dispatch(); return; }
+          if (value.startsWith(":")) return;
+          const colon = value.indexOf(":"), field = colon < 0 ? value : value.slice(0, colon);
+          let content = colon < 0 ? "" : value.slice(colon + 1); if (content.startsWith(" ")) content = content.slice(1);
+          if (field === "event") eventName = content;
+          if (field === "data") { eventSize += content.length + 1; if (eventSize > maxEvent) throw new Error("模型流式记录超过安全大小限制"); eventData.push(content); }
+        };
+        while (!doneMarker) {
+          const { value, done } = await reader.read();
+          if (done) { buf += dec.decode(); if (buf) line(buf); if (!doneMarker) dispatch(); break; }
+          bytes += value.length; if (bytes > maxResponse) throw new Error("模型响应超过安全大小限制，任务已停止");
+          buf += dec.decode(value, { stream: true });
+          let index: number;
+          while (!doneMarker && (index = buf.indexOf("\n")) >= 0) { const value = buf.slice(0, index); buf = buf.slice(index + 1); line(value); }
+          if (buf.length > maxEvent) throw new Error("模型流式记录超过安全大小限制");
+        }
+        if (!doneMarker && !finished) throw new Error("模型流式响应提前结束，未收到完成标记");
+      }
+      emitContent("", true);
+      if (!text.trim()) throw new Error(reasoningChars ? "模型仅返回了推理过程，没有最终回复" : "模型没有返回内容");
+      const result = { text, model, usage, apiMessage: { role: "assistant" as const, content: text, ...(hasReasoning ? { reasoning_content: this.safeError(reasoningText) } : {}) } };
+      if (req.cache) writeOpenAIResponseCache(this.spec, wireBody, result, deltas);
+      return result;
+    } catch (error: any) {
+      if (req.signal.aborted) throw abortError();
+      if (deadline.signal.aborted) throw new Error(`模型请求超时（${timeoutMs} 毫秒）`);
+      throw new Error(this.safeError(error?.message ?? error).slice(0, 2000));
+    } finally {
+      clearTimeout(timer);
+      try { await reader?.cancel(); } catch {}
+      reader?.releaseLock();
+    }
   }
 }
 

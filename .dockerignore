@@ -9,6 +9,11 @@ downloads
 release
 deploy/keys
 migration
+handoff
+HANDOFF.md
+dist
+public/app-vendor.js
+scripts/collect-handoff.mjs
 .DS_Store
 /__MACOSX/
 /peergrading/
