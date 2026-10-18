@@ -134,6 +134,8 @@ textarea { resize: vertical; }
 .local-model-connection > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .local-model-controls { display: flex; gap: 6px; flex: none; }
 .local-model-message.error { color: var(--warn); }
+.local-models .auto-status.ready { color: var(--ok); }
+.local-models .auto-status.required { color: var(--amber); }
 @media (max-width: 540px) { .local-models .row { flex-direction: column; } .local-model-connection { align-items: flex-start; flex-direction: column; } }
 .cards { padding: 16px 22px 20px; overflow: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .card { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); cursor: pointer; transition: border-color .12s, transform .08s; }

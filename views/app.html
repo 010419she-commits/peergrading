@@ -158,24 +158,28 @@
     </form>
     <p class="hint local-model-message" id="api-model-message" role="status" aria-live="polite"></p>
   </details>
-  <details class="local-models" id="local-models" hidden>
+  <details class="local-models" id="local-models" hidden open>
     <summary data-i18n="localModelsTitle"></summary>
     <p class="hint" data-i18n="localModelsHint"></p>
     <p class="hint" data-i18n="localModelsModeHint"></p>
-    <div class="local-model-list" id="local-model-list"></div>
-    <form id="local-model-form" autocomplete="off">
-      <h3 id="local-model-form-title"></h3>
-      <div class="row">
-        <div><label for="local-model-name" data-i18n="localModelName"></label><input id="local-model-name" list="local-model-presets" value="NInfer" maxlength="80" required spellcheck="false" data-i18n-ph="localModelNamePh"></div>
-        <div><label for="local-model-base" data-i18n="localModelBase"></label><input id="local-model-base" type="url" value="http://127.0.0.1:8080/v1" required spellcheck="false" placeholder="http://127.0.0.1:8080/v1"></div>
-      </div>
-      <datalist id="local-model-presets"><option value="NInfer"></option><option value="Strata"></option></datalist>
-      <label for="local-model-model" data-i18n="localModelModel"></label><input id="local-model-model" spellcheck="false" data-i18n-ph="localModelModelPh">
-      <label for="local-model-key" data-i18n="localModelKey"></label><input id="local-model-key" type="password" autocomplete="new-password" spellcheck="false">
-      <label class="check" id="local-model-clear-row" for="local-model-clear" hidden><input id="local-model-clear" type="checkbox"><span data-i18n="localModelClearKey"></span></label>
-      <div class="row btns"><button class="btn sm primary" id="local-model-save" type="submit" data-i18n="localModelSave"></button><button class="btn sm" id="local-model-cancel" type="button" data-i18n="localModelCancel" hidden></button></div>
-    </form>
-    <p class="hint local-model-message" id="local-model-message" role="status" aria-live="polite"></p>
+    <p class="hint local-model-auto-status" id="local-model-auto-status" role="status" aria-live="polite"></p>
+    <details id="local-model-manual">
+      <summary data-i18n="localModelManual"></summary>
+      <div class="local-model-list" id="local-model-list"></div>
+      <form id="local-model-form" autocomplete="off">
+        <h3 id="local-model-form-title"></h3>
+        <div class="row">
+          <div><label for="local-model-name" data-i18n="localModelName"></label><input id="local-model-name" list="local-model-presets" value="NInfer" maxlength="80" required spellcheck="false" data-i18n-ph="localModelNamePh"></div>
+          <div><label for="local-model-base" data-i18n="localModelBase"></label><input id="local-model-base" type="url" value="http://127.0.0.1:8080/v1" required spellcheck="false" placeholder="http://127.0.0.1:8080/v1"></div>
+        </div>
+        <datalist id="local-model-presets"><option value="NInfer"></option><option value="Strata"></option></datalist>
+        <label for="local-model-model" data-i18n="localModelModel"></label><input id="local-model-model" spellcheck="false" data-i18n-ph="localModelModelPh">
+        <label for="local-model-key" data-i18n="localModelKey"></label><input id="local-model-key" type="password" autocomplete="new-password" spellcheck="false">
+        <label class="check" id="local-model-clear-row" for="local-model-clear" hidden><input id="local-model-clear" type="checkbox"><span data-i18n="localModelClearKey"></span></label>
+        <div class="row btns"><button class="btn sm primary" id="local-model-save" type="submit" data-i18n="localModelSave"></button><button class="btn sm" id="local-model-cancel" type="button" data-i18n="localModelCancel" hidden></button></div>
+      </form>
+      <p class="hint local-model-message" id="local-model-message" role="status" aria-live="polite"></p>
+    </details>
   </details>
   <div class="cards" id="cards"></div>
 </div></div>

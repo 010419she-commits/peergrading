@@ -133,6 +133,20 @@ export async function detectLocalOpenAIAgents(options: DetectLocalOpenAIOptions 
           "The specified model was not advertised by this endpoint. Check its model ID, or clear the model field to discover available models.",
         ));
       }
+      if (endpoint.source === "compatible" || endpoint.source === "qwen") {
+        try {
+          const healthUrl = new URL(endpoint.baseUrl);
+          healthUrl.pathname = "/health";
+          healthUrl.search = "";
+          healthUrl.hash = "";
+          const healthResponse = await fetcher(healthUrl.href, { headers, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
+          if (healthResponse.ok) {
+            const health = await healthResponse.json();
+            const service = string(health?.service)?.toLowerCase();
+            if (service === "strata" || service === "ninfer") endpoint = { ...endpoint, source: service };
+          }
+        } catch {}
+      }
       return models.map((model) => entry(endpoint, model, "ready"));
     } catch {
       return failed("server_off", L(

@@ -9,4 +9,10 @@ test("Windows installer allows choosing the directory and creates shortcuts", ()
   assert.equal(pkg.build.nsis.createDesktopShortcut, true);
   assert.equal(pkg.build.nsis.createStartMenuShortcut, true);
   assert.equal(pkg.build.nsis.shortcutName, "PeerGrading");
+  assert.notEqual(pkg.build.nsis.removeDefaultUninstallWelcomePage, true);
+  assert.notEqual(pkg.build.nsis.deleteAppDataOnUninstall, true);
+
+  const script = fs.readFileSync(new URL("../build/installer.nsh", import.meta.url), "utf8");
+  assert.ok(script.includes('WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"'));
+  assert.ok(script.includes('WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayIcon" "$appExe,0"'));
 });

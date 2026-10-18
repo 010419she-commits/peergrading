@@ -39,6 +39,8 @@ PeerGrading 是一个以 [MIT](LICENSE) 发布的开源双 Agent 协作工具。
 
 Windows 安装程序使用安装向导，可查看并更改安装目录，并默认创建 PeerGrading 桌面和开始菜单快捷方式。
 
+Windows 安装后，PeerGrading 会注册到「设置 → 应用 → 安装的应用」，可从系统菜单卸载。本地会话、仓库与模型配置按当前卸载规则保留。
+
 macOS 是否签名和公证取决于 Release Runner 实际配置的 Apple 凭证；没有凭证时，项目不会把产物描述为已签名或已公证。不要仅凭下载页面推断签名状态，也不要用绕过 Gatekeeper 的方式替代可信发布。
 
 桌面应用不需要 PeerGrading 账号。所选的 Kimi Code、Codex、Claude Code 等 CLI 可能需要各自登录，云 API 也可能由供应商计费；这些是第三方服务要求，不是 PeerGrading 会员或付费墙。
@@ -47,6 +49,7 @@ macOS 是否签名和公证取决于 Release Runner 实际配置的 Apple 凭证
 
 - **仓库编辑**：使用支持文件工具的 Kimi Code、Codex 或 Claude Code CLI。安装、授权与可用额度由各 CLI 自己管理。
 - **文字与代码审查**：可使用本地模型、OpenAI 兼容 API 或其他已支持后端。Base URL 和模型权限以供应商为准。
+- **本地模型自动识别**：桌面软件自动识别 Ollama、LM Studio 和本机兼容接口，无需手填接口地址或连接名称；请先启动服务并加载本地大模型，再重新识别。
 - **剪贴板中转**：没有 CLI 或 API 时，可在用户选择的桌面 AI 应用之间手动转发内容。
 - **配置位置**：模型连接和密钥应只在本机应用的安全配置入口中维护，不要写入仓库、文档、截图或公网站点环境变量。
 

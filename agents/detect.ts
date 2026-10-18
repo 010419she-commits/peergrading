@@ -89,7 +89,7 @@ function run(bin: string, args: string[], stdin: string, timeoutMs: number): Pro
   });
 }
 
-function execJson(bin: string, args: string[], timeoutMs = 8000): Promise<any> {
+function execJson(bin: string, args: string[], timeoutMs = 3000): Promise<any> {
   return new Promise((resolve) => {
     execFile(bin, args, { env: cleanEnv(), timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       if (err) return resolve(null);
@@ -146,8 +146,7 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
     runner: { type: "claude-code", bin, model: configuredModel },
   };
 
-  // 优先用 `claude auth status --json`（不消耗额度）；旧版本不支持时再用一次真实请求探测
-  const st = await run(bin, ["auth", "status", "--json"], "", 20_000);
+  const st = await run(bin, ["auth", "status", "--json"], "", 3000);
   let loggedIn: boolean | null = null;
   try { const j = JSON.parse(st.stdout.slice(st.stdout.indexOf("{"))); if (typeof j.loggedIn === "boolean") loggedIn = j.loggedIn; } catch {}
   const px = proxyEnvPrefix();
@@ -161,20 +160,7 @@ async function detectClaudeCode(): Promise<AgentDraft | null> {
     info.hintCommand = notLoggedInHint;
     return info;
   }
-  const r = await run(bin, ["-p", "--output-format", "stream-json", "--verbose", "--tools", "", "--max-turns", "1",
-    "--system-prompt", "Reply with the single word OK."], "OK?", 60_000);
-  const p = parseCliProbe(r.stdout);
-  if (/not logged in/i.test(p.text) || /not logged in/i.test(r.stderr)) {
-    info.status = "not_logged_in";
-    info.statusDetail = L("命令行尚未登录（桌面版的登录不共享给命令行）", "The CLI is not logged in (the desktop app login is not shared with the CLI)");
-    info.hintCommand = onPath ? L(`${px}${claudeCmd}   # 然后输入 /login`, `${px}${claudeCmd}   # then type /login`) : L(`${px}npm install -g @anthropic-ai/claude-code${and}claude   # 然后输入 /login`, `${px}npm install -g @anthropic-ai/claude-code${and}claude   # then type /login`);
-  } else if (p.isError || r.code !== 0) {
-    info.status = "error";
-    info.statusDetail = (p.error || r.stderr || `exit ${r.code}`).slice(0, 300);
-  } else {
-    info.status = "ready";
-    if (p.model) { info.model = p.model; info.runner = { ...info.runner, model: configuredModel } as RunnerSpec; }
-  }
+  info.statusDetail = L("已检测到 Claude Code；识别阶段不发送模型请求，开始协作时再验证连接。", "Claude Code detected; no model request is sent during detection. The connection is verified when collaboration starts.");
   return info;
 }
 
@@ -223,18 +209,7 @@ async function detectQwenCloud(settings: any, localAgents?: AgentInfo[]): Promis
     info.hintCommand = L("qwen   # 首次启动时按提示完成登录", "qwen   # follow the login prompt on first launch");
     return info;
   }
-  const r = await run(bin, ["--safe-mode", "--approval-mode", "plan", "--output-format", "stream-json",
-    "--max-session-turns", "1", "--system-prompt", "Reply with the single word OK.", "-p", "OK?"], "", 60_000);
-  const p = parseCliProbe(r.stdout);
-  if (p.isError) {
-    const msg = p.error;
-    info.status = /auth|login|api key/i.test(msg) ? "not_logged_in" : "error";
-    info.statusDetail = msg.slice(0, 300);
-    if (info.status === "not_logged_in") info.hintCommand = L("qwen   # 首次启动时按提示完成登录", "qwen   # follow the login prompt on first launch");
-  } else {
-    info.status = "ready";
-    if (p.model) info.model = p.model;
-  }
+  info.statusDetail = L("已读取本机认证配置；识别阶段不发送模型请求，开始协作时再验证连接。", "Local authentication configuration detected; no model request is sent during detection. The connection is verified when collaboration starts.");
   return info;
 }
 
@@ -265,7 +240,7 @@ async function detectOllama(): Promise<LocalServer | null> {
   if (!ollama && !live) return null;
   let models: string[] = live?.models?.map((m: any) => m.name) ?? [];
   if (models.length === 0 && ollama) {
-    const r = await run(ollama, ["list"], "", 5000);
+    const r = await run(ollama, ["list"], "", 3000);
     models = r.stdout.split("\n").slice(1).map((l) => l.split(/\s+/)[0]).filter(Boolean);
   }
   const ps = live ? await fetchJson(`${OLLAMA_URL}/api/ps`) : null;
@@ -279,12 +254,12 @@ export function localEntries(srv: LocalServer, qwenBin: string | null): AgentDra
   if (srv.models.length === 0) {
     return [{
       id: `${srv.service}`, kind: "local", title: srv.title, subtitle: L("本地 · 尚未下载任何模型", "Local · no models downloaded yet"), model: "—",
-      local: true, status: "error", statusDetail: L(`请先在 ${srv.title} 中下载一个模型`, `Download a model in ${srv.title} first`), service: srv.service,
+      local: true, status: "error", statusDetail: L(`请先在 ${srv.title} 中下载并加载一个本地大模型`, `Download and load a local model in ${srv.title} first`), service: srv.service,
       icon, runner: { type: "openai", baseUrl: srv.baseUrl, apiKey: srv.apiKey, model: "" },
     }];
   }
   const status = srv.up ? "ready" : "server_off";
-  const statusDetail = srv.up ? undefined : L("本地服务未运行，可在此一键启动", "Local server is not running; start it here with one click");
+  const statusDetail = srv.up ? undefined : L(`请先启动 ${srv.title} 并加载本地大模型；也可在此一键启动服务`, `Start ${srv.title} and load a local model first; you can also start the service here`);
   const models = [...new Set([...(srv.loaded ? [srv.loaded] : []), ...srv.models].filter((model) => typeof model === "string" && model.trim()))];
   const out: AgentDraft[] = [];
   for (const model of models) {
@@ -329,7 +304,7 @@ export async function detectKimiCode(): Promise<AgentDraft | null> {
     model: L("默认模型", "Default model"), status: "unverified", runner: { type: "kimi-code", bin },
   };
   // A help-only capability check never sends a model request or imports workspace config.
-  const help = await run(bin, ["--help"], "", 15_000);
+  const help = await run(bin, ["--help"], "", 3000);
   if (help.code !== 0 || !["--agent-file", "--add-dir", "--prompt", "--output-format"].every((f) => help.stdout.includes(f))) {
     info.status = "error";
     info.statusDetail = L("需要新版 Kimi Code CLI 2.x；旧版 Python kimi-cli 不支持本应用的受限工具模式", "Kimi Code CLI 2.x is required; legacy Python kimi-cli does not support the restricted tool profile");
@@ -361,7 +336,7 @@ async function appxInstallLocation(name: string): Promise<string | null> {
   const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $p = Get-AppxPackage -Name '${name.replace(/'/g, "''")}' | Select-Object -First 1; if ($p) { [Console]::Out.Write($p.InstallLocation) }`;
   return new Promise((resolve) => {
     execFile(POWERSHELL, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
-      { encoding: "utf8", timeout: 15_000, windowsHide: true }, (err, stdout) => resolve(!err && stdout.trim() ? stdout.trim() : null));
+      { encoding: "utf8", timeout: 3000, windowsHide: true }, (err, stdout) => resolve(!err && stdout.trim() ? stdout.trim() : null));
   });
 }
 
@@ -432,25 +407,7 @@ async function detectCodex(): Promise<AgentDraft | null> {
     info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : codexLogin;
     return info;
   }
-  const r = await run(found.bin, ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "notify=[]",
-    "Reply with the single word OK"], "", 90_000);
-  let text = "", err = "";
-  for (const line of r.stdout.split("\n")) {
-    if (!line.startsWith("{")) continue;
-    try {
-      const d = JSON.parse(line);
-      if (d.type === "item.completed" && d.item?.type === "agent_message") text = d.item.text ?? "";
-      if (d.type === "item.completed" && d.item?.type === "error" && !/deprecated/i.test(d.item.message ?? "")) err = d.item.message ?? "";
-      if (d.type === "error") err = d.message ?? JSON.stringify(d);
-    } catch {}
-  }
-  if (text) info.status = "ready";
-  else {
-    const msg = err || r.stderr || `exit ${r.code}`;
-    info.status = /login|auth|sign in|unauthorized|401/i.test(msg) ? "not_logged_in" : "error";
-    info.statusDetail = msg.slice(0, 300);
-    if (info.status === "not_logged_in") info.hintCommand = found.bundled ? L("打开 ChatGPT 应用 → Codex → 登录", "Open the ChatGPT app → Codex → sign in") : codexLogin;
-  }
+  info.statusDetail = L("已读取本机认证配置；识别阶段不发送模型请求，开始协作时再验证连接。", "Local authentication configuration detected; no model request is sent during detection. The connection is verified when collaboration starts.");
   return info;
 }
 
@@ -498,7 +455,7 @@ async function detectKimiApi(): Promise<AgentDraft | null> {
     runner: { type: "openai", baseUrl: KIMI_URL, apiKey: key, model: process.env.KIMI_MODEL ?? "kimi-k2-0905-preview" },
   };
   try {
-    const res = await fetch(`${KIMI_URL}/models`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`${KIMI_URL}/models`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(3000) });
     if (res.status === 401) { info.status = "error"; info.statusDetail = L("KIMI_API_KEY 无效或已过期", "KIMI_API_KEY is invalid or expired"); return info; }
     const j: any = await res.json();
     const ids: string[] = (j.data ?? []).map((m: any) => m.id);

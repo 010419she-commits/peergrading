@@ -98,7 +98,7 @@ async function loadAgents(refresh = false) {
     for (const k of ["A", "B"]) if (chosen[k]?.runner?.app) $("#app-" + k).value = chosen[k].runner.app;
   }
   initialAgentSelection = false;
-  renderSlot("A"); renderSlot("B"); renderCards();
+  renderSlot("A"); renderSlot("B"); renderCards(); renderLocalModels();
 }
 function statusLabel(a) { return t("st_" + a.status); }
 function renderSlot(k) {
@@ -291,6 +291,11 @@ function renderLocalModels() {
   const panel = $("#local-models"); if (!panel) return;
   panel.hidden = !localModelsAvailable;
   if (!localModelsAvailable) return;
+  const readyLocalModels = agents.filter((agent) => agent.kind === "local" && agent.status === "ready");
+  const autoStatus = $("#local-model-auto-status");
+  autoStatus.textContent = readyLocalModels.length ? t("localModelsDetected")(readyLocalModels.length) : t("localModelsStartRequired");
+  autoStatus.classList.toggle("ready", readyLocalModels.length > 0);
+  autoStatus.classList.toggle("required", readyLocalModels.length === 0);
   const list = $("#local-model-list"); list.replaceChildren();
   if (!localModelConnections.length) {
     const empty = document.createElement("p"); empty.className = "hint"; empty.textContent = t("localModelsEmpty"); list.append(empty);
