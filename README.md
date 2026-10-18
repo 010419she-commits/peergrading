@@ -1,6 +1,12 @@
 # PeerGrading
 
-Two AI coding agents take turns writing and reviewing, with local-first repository collaboration and no PeerGrading account requirement.
+**Open-source, local-first dual-agent AI code review and collaboration desktop app.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Download](https://img.shields.io/badge/download-GitHub%20Releases-brightgreen.svg)](https://github.com/010419she-commits/peergrading/releases)
+[![Website](https://img.shields.io/badge/website-peergrading.ai-orange.svg)](https://peergrading.ai)
+
+Two AI coding agents take turns writing and reviewing. PeerGrading supports local-first Git worktree collaboration, cloud-assisted parallel pre-review, exact request caching, Electron for Windows and macOS, and OpenAI-compatible providers including Kimi, Codex, Claude Code, Ollama and LM Studio—without requiring a PeerGrading account.
 
 PeerGrading 是一个以 [MIT](LICENSE) 发布的开源双 Agent 协作工具。两个智能体轮流担任**作者**与**审查者**：阅读实际成果、提出意见、交换角色并继续修改。0.6.0 不要求 PeerGrading 登录、会员或付费，本地桌面安装后即可使用；公网站点只用于项目展示和安装包下载。
 
