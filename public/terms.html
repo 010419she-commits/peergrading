@@ -1,44 +1,94 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">
-  <meta name="description" content="PeerGrading Terms of Service covering the MIT license, local and cloud agent collaboration, third-party providers, and user responsibilities.">
-  <title>Terms of Service · PeerGrading</title><link rel="stylesheet" href="/legal.css">
+  <meta name="description" content="PeerGrading Terms of Service in Chinese and English.">
+  <title>服务条款 · Terms of Service · PeerGrading</title><link rel="stylesheet" href="/legal.css">
 </head>
 <body>
-  <a class="skip" href="#content">Skip to content</a>
-  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="Legal navigation"><a href="/privacy">Privacy Notes</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">Report an issue</a></nav></header>
+  <a class="skip" href="#content">跳到正文 / Skip to content</a>
+  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="Legal navigation"><a href="/privacy">隐私说明 / Privacy</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">问题反馈 / Issues</a></nav></header>
   <main id="content" class="legal-main">
-    <p class="eyebrow">TERMS / USE</p><h1>Terms of Service</h1>
-    <p class="meta">Updated and effective: October 18, 2026</p>
-    <p class="intro">These terms apply to the PeerGrading open-source desktop app and the peergrading.ai download site. The core software is provided under the MIT license and requires no PeerGrading account, membership or payment. Third-party agents and model providers remain governed by their own terms.</p>
-    <aside class="notice" aria-label="Important terms"><strong>Please read carefully:</strong> automated review and tests cannot prove that output is error-free. Cloud assist reduces end-to-end waiting but never changes review or approval requirements. Review code, diffs, dependencies and check results before running, merging or deploying.</aside>
-    <nav class="contents" aria-label="Contents"><a href="#license">Open-source license</a><a href="#use">Collaboration and use</a><a href="#third-party">Third-party services</a><a href="#responsibility">Liability and disputes</a><a href="#updates">Updates and contact</a></nav>
-    <section id="license"><h2>1. Open-source license and scope</h2>
-      <p>PeerGrading orchestrates two agents that take turns completing, reviewing, discussing and revising a task, while retaining versions, patches and check results. Source code is provided under the <a href="https://github.com/010419she-commits/peergrading/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>, and you may use, copy, modify and distribute it within that license.</p>
-      <p>The download site only presents the project and links to GitHub Releases. Legacy accounts, device pairing, memberships, orders and payment interfaces are not part of the current service.</p>
-    </section>
-    <section id="use"><h2>2. Repository collaboration and boundaries</h2>
-      <p>You authorize the app to read necessary files in the selected directory and task scope, create a separate task branch and Git worktree, call agents to modify files, and run the check commands you enter. Task results are retained for your review by default and are not automatically merged or pushed to the original repository.</p>
-      <p>Back up important content and verify the repository, commands, agents and execution environment before starting. Check commands can execute project code, install dependencies or access the network. A Git worktree is not an operating-system security sandbox, and local execution is not inherently isolated from your computer.</p>
-      <p><strong>An approved review only means that the configured review and checks passed for that run; it is not a guarantee of safety, correctness, merchantability or fitness for a purpose.</strong> A run that was not executed, failed, reached its limit or was cancelled must not be treated as accepted output.</p>
-      <p>Do not use the software for illegal activity, privacy or intellectual-property violations, malware, unauthorized access or bypassing third-party permissions. Submit only code, commands and content you are authorized to use.</p>
-    </section>
-    <section id="third-party"><h2>3. Third-party agents, models and fees</h2>
-      <p>Kimi Code, Codex, Claude Code, model APIs and media services are provided by third parties. You must complete installation and authorization and follow their terms. Availability, quota, fees, data processing and output restrictions are determined by those platforms. PeerGrading does not sell third-party subscriptions or API usage.</p>
-      <p>By choosing a cloud agent or endpoint, you allow the local app to send the context required for the task to that provider. Retention, training use and refunds for third-party content must be handled directly with the provider. Uninstalling PeerGrading does not automatically cancel a third-party subscription.</p>
-      <p>You retain the rights you already hold in the code and task content you provide. Rights and redistribution of AI output depend on applicable law, third-party terms and any pre-existing materials; review the output before using it.</p>
-    </section>
-    <section id="responsibility"><h2>4. Liability and applicable law</h2>
-      <p>The software and website are provided “as is”; the warranty and liability terms in the MIT license apply to the open-source code. We do not promise that third parties will never be interrupted, that AI output will be error-free, or that checks cover every issue, and we do not exclude liability that cannot legally be excluded.</p>
-      <p>Effects caused by user-selected commands, unauthorized content, unreviewed deployments or independent third-party actions are allocated according to the facts, causation, applicable law and the relevant license terms.</p>
-      <p>Applicable law for the service and any dispute is determined by law; mandatory consumer-protection rules in your usual place of residence are not excluded. For general implementation issues, first use a GitHub issue.</p>
-    </section>
-    <section id="updates"><h2>5. Updates and contact</h2>
-      <p>Features, documentation and these terms may change with new versions. Updates will show a date and can be reviewed through the public repository history. No legacy account or order rule is implied, because the current version does not provide those systems.</p>
-      <p>For questions or issues, use <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issues</a>. Do not post passwords, API keys, private keys or unnecessary personal information. Privacy boundaries are described in the <a href="/privacy">Privacy Notes</a>.</p>
-    </section>
-    <footer class="legal-footer"><a href="/">Back to home</a><a href="/privacy">Privacy Notes</a><a href="#content">Back to top</a></footer>
+    <div class="lang-seg" aria-label="Language"><button type="button" data-lang="zh">中文</button><button type="button" data-lang="en">English</button></div>
+    <div data-lang-content="zh">
+      <p class="eyebrow">TERMS / 服务与使用约定</p><h1>服务条款</h1>
+      <p class="meta">更新及生效日期：2026 年 10 月 18 日</p>
+      <p class="intro">本条款适用于 PeerGrading 开源桌面软件和 peergrading.ai 下载站。核心软件以 MIT 许可证提供，不需要 PeerGrading 账号、会员或付款。第三方 Agent 和模型服务仍受其自身条款约束。</p>
+      <aside class="notice" aria-label="重要条款"><strong>请重点阅读：</strong>自动审查和测试不能保证输出无误；云端辅助只减少任务等待，不改变审查或通过条件。您应审阅代码、差异、依赖和检查结果后再决定运行、合并或部署。</aside>
+      <nav class="contents" aria-label="目录"><a href="#license-zh">开源许可</a><a href="#use-zh">协作与使用</a><a href="#third-party-zh">第三方服务</a><a href="#responsibility-zh">责任与争议</a><a href="#updates-zh">更新与联系</a></nav>
+      <section id="license-zh"><h2>一、开源许可与服务范围</h2>
+        <p>PeerGrading 用于编排两个 Agent 轮流完成、审查、讨论和修改任务，并可保存版本、补丁和检查结果。源代码按 <a href="https://github.com/010419she-commits/peergrading/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT 许可证</a> 提供；您可以在该许可证范围内使用、复制、修改和分发。</p>
+        <p>下载站仅提供项目介绍和 GitHub Releases 下载入口。旧账号、设备配对、会员、订单和支付接口不再构成当前服务的一部分。</p>
+      </section>
+      <section id="use-zh"><h2>二、仓库协作与使用边界</h2>
+        <p>您授权软件在所选目录和任务范围内读取必要文件、创建独立任务分支及 worktree、调用 Agent 修改文件，并执行您填写的检查命令。默认保留任务结果供您审阅，不自动合并或推送原始仓库。</p>
+        <p>运行前请备份重要内容并确认仓库、命令、Agent 和执行环境。检查命令可能执行项目代码、安装依赖或访问网络；Git worktree 不是操作系统安全沙箱，本机执行也不天然与电脑隔离。</p>
+        <p><strong>“审查通过”只表示该次流程满足已配置的审查和检查条件，不保证成果安全、正确、适销或适合特定用途。</strong>未运行、失败、达到轮数上限或取消的任务不能当作已验收成果。</p>
+        <p>不得利用软件实施违法行为、侵犯隐私或知识产权、传播恶意软件、未授权访问或绕过第三方权限。您应仅提交有权使用的代码、命令和内容。</p>
+      </section>
+      <section id="third-party-zh"><h2>三、第三方 Agent、模型与费用</h2>
+        <p>Kimi Code、Codex、Claude Code、模型接口和媒体服务由第三方提供。您需自行完成安装、授权并遵守其条款；可用性、额度、费用、数据处理和输出限制由对应平台决定。PeerGrading 不销售第三方订阅或 API 用量。</p>
+        <p>选择云端 Agent 或接口即表示您允许本机软件把任务所需上下文发送给对应服务商。第三方内容的保存、训练和退款事宜需要直接向该服务商处理，卸载 PeerGrading 不会自动取消第三方订阅。</p>
+        <p>您保留输入代码和任务内容原有的权利。AI 输出的权利与可分发性取决于适用法律、第三方约定和已有材料；请在使用前自行审查。</p>
+      </section>
+      <section id="responsibility-zh"><h2>四、责任与适用法律</h2>
+        <p>软件和网站按“现状”提供，MIT 许可证中的保证与责任条款适用于开源代码。我们不承诺第三方永不中断、AI 输出无误或检查覆盖全部问题，也不排除依法不能排除的责任。</p>
+        <p>用户选择的命令、无权提供的内容、未经审查的部署以及第三方独立行为造成的影响，按事实、因果关系、适用法律和相应许可条款确定责任。</p>
+        <p>服务关系及争议依法确定适用法律；用户通常居住地的强制性消费者保护规则不被排除。请先通过 GitHub issue 沟通一般实现问题。</p>
+      </section>
+      <section id="updates-zh"><h2>五、更新与联系</h2>
+        <p>功能、文档和本条款可能随版本更新，更新会注明日期并可通过公开仓库核对。重大变化不以旧账号或订单规则推定，因为当前版本不提供这些系统。</p>
+        <p>问题反馈请使用 <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issue</a>。请不要在公开反馈中提交密码、API Key、私钥或不必要的个人信息。隐私边界见<a href="/privacy">隐私说明</a>。</p>
+      </section>
+    </div>
+    <div data-lang-content="en" hidden>
+      <p class="eyebrow">TERMS / USE</p><h1>Terms of Service</h1>
+      <p class="meta">Updated and effective: October 18, 2026</p>
+      <p class="intro">These terms apply to the PeerGrading open-source desktop app and the peergrading.ai download site. The core software is provided under the MIT license and requires no PeerGrading account, membership or payment. Third-party agents and model providers remain governed by their own terms.</p>
+      <aside class="notice" aria-label="Important terms"><strong>Please read carefully:</strong> automated review and tests cannot prove that output is error-free. Cloud assist reduces end-to-end waiting but never changes review or approval requirements. Review code, diffs, dependencies and check results before running, merging or deploying.</aside>
+      <nav class="contents" aria-label="Contents"><a href="#license-en">Open-source license</a><a href="#use-en">Collaboration and use</a><a href="#third-party-en">Third-party services</a><a href="#responsibility-en">Liability and disputes</a><a href="#updates-en">Updates and contact</a></nav>
+      <section id="license-en"><h2>1. Open-source license and scope</h2>
+        <p>PeerGrading orchestrates two agents that take turns completing, reviewing, discussing and revising a task, while retaining versions, patches and check results. Source code is provided under the <a href="https://github.com/010419she-commits/peergrading/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>, and you may use, copy, modify and distribute it within that license.</p>
+        <p>The download site only presents the project and links to GitHub Releases. Legacy accounts, device pairing, memberships, orders and payment interfaces are not part of the current service.</p>
+      </section>
+      <section id="use-en"><h2>2. Repository collaboration and boundaries</h2>
+        <p>You authorize the app to read necessary files in the selected directory and task scope, create a separate task branch and Git worktree, call agents to modify files, and run the check commands you enter. Task results are retained for your review by default and are not automatically merged or pushed to the original repository.</p>
+        <p>Back up important content and verify the repository, commands, agents and execution environment before starting. Check commands can execute project code, install dependencies or access the network. A Git worktree is not an operating-system security sandbox, and local execution is not inherently isolated from your computer.</p>
+        <p><strong>An approved review only means that the configured review and checks passed for that run; it is not a guarantee of safety, correctness, merchantability or fitness for a purpose.</strong> A run that was not executed, failed, reached its limit or was cancelled must not be treated as accepted output.</p>
+        <p>Do not use the software for illegal activity, privacy or intellectual-property violations, malware, unauthorized access or bypassing third-party permissions. Submit only code, commands and content you are authorized to use.</p>
+      </section>
+      <section id="third-party-en"><h2>3. Third-party agents, models and fees</h2>
+        <p>Kimi Code, Codex, Claude Code, model APIs and media services are provided by third parties. You must complete installation and authorization and follow their terms. Availability, quota, fees, data processing and output restrictions are determined by those platforms. PeerGrading does not sell third-party subscriptions or API usage.</p>
+        <p>By choosing a cloud agent or endpoint, you allow the local app to send the context required for the task to that provider. Retention, training use and refunds for third-party content must be handled directly with the provider. Uninstalling PeerGrading does not automatically cancel a third-party subscription.</p>
+        <p>You retain the rights you already hold in the code and task content you provide. Rights and redistribution of AI output depend on applicable law, third-party terms and any pre-existing materials; review the output before using it.</p>
+      </section>
+      <section id="responsibility-en"><h2>4. Liability and applicable law</h2>
+        <p>The software and website are provided “as is”; the warranty and liability terms in the MIT license apply to the open-source code. We do not promise that third parties will never be interrupted, that AI output will be error-free, or that checks cover every issue, and we do not exclude liability that cannot legally be excluded.</p>
+        <p>Effects caused by user-selected commands, unauthorized content, unreviewed deployments or independent third-party actions are allocated according to the facts, causation, applicable law and the relevant license terms.</p>
+        <p>Applicable law for the service and any dispute is determined by law; mandatory consumer-protection rules in your usual place of residence are not excluded. For general implementation issues, first use a GitHub issue.</p>
+      </section>
+      <section id="updates-en"><h2>5. Updates and contact</h2>
+        <p>Features, documentation and these terms may change with new versions. Updates will show a date and can be reviewed through the public repository history. No legacy account or order rule is implied, because the current version does not provide those systems.</p>
+        <p>For questions or issues, use <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issues</a>. Do not post passwords, API keys, private keys or unnecessary personal information. Privacy boundaries are described in the <a href="/privacy">Privacy Notes</a>.</p>
+      </section>
+    </div>
+    <footer class="legal-footer"><a href="/">返回首页 / Home</a><a href="/privacy">隐私说明 / Privacy</a><a href="#content">回到顶部 / Top</a></footer>
   </main>
+  <script>
+    (() => {
+      const buttons = document.querySelectorAll("[data-lang]");
+      const panels = document.querySelectorAll("[data-lang-content]");
+      const setLanguage = (lang) => {
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        panels.forEach((panel) => { panel.hidden = panel.dataset.langContent !== lang; });
+        buttons.forEach((button) => button.classList.toggle("active", button.dataset.lang === lang));
+        try { localStorage.setItem("lang", lang); } catch {}
+      };
+      buttons.forEach((button) => button.addEventListener("click", () => setLanguage(button.dataset.lang)));
+      let initial = "zh";
+      try { initial = localStorage.getItem("lang") || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en"); } catch {}
+      setLanguage(initial === "en" ? "en" : "zh");
+    })();
+  </script>
 </body>
 </html>

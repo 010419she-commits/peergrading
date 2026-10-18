@@ -1,44 +1,94 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">
-  <meta name="description" content="PeerGrading privacy notes for the open-source desktop app, local data, third-party model providers, and the public download site.">
-  <title>Privacy Notes · PeerGrading</title><link rel="stylesheet" href="/legal.css">
+  <meta name="description" content="PeerGrading privacy notes in Chinese and English.">
+  <title>隐私说明 · Privacy Notes · PeerGrading</title><link rel="stylesheet" href="/legal.css">
 </head>
 <body>
-  <a class="skip" href="#content">Skip to content</a>
-  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="Legal navigation"><a href="/terms">Terms of Service</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">Report an issue</a></nav></header>
+  <a class="skip" href="#content">跳到正文 / Skip to content</a>
+  <header class="legal-header"><a class="brand" href="/">PeerGrading</a><nav aria-label="Legal navigation"><a href="/terms">服务条款 / Terms</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">问题反馈 / Issues</a></nav></header>
   <main id="content" class="legal-main">
-    <p class="eyebrow">PRIVACY / DATA</p><h1>Privacy Notes</h1>
-    <p class="meta">Updated and effective: October 18, 2026</p>
-    <p class="intro">These notes apply to the PeerGrading open-source desktop app and the peergrading.ai download site. PeerGrading does not provide accounts, memberships, orders or payments, and does not ask you to create an account.</p>
-    <aside class="notice" aria-label="Important information"><strong>Local-first does not mean every byte stays on your computer.</strong> Tasks, sessions and model settings are stored locally by default. Content is sent to a provider only when you choose a cloud agent or cloud model.</aside>
-    <nav class="contents" aria-label="Contents"><a href="#local">Local data</a><a href="#cloud">Third-party providers</a><a href="#website">Download site</a><a href="#retention">Retention and deletion</a><a href="#contact">Issues and updates</a></nav>
-    <section id="local"><h2>1. Local data and your control</h2>
-      <p>The desktop app stores tasks, agent conversations, versions, patches, check output, media, run reports and your selected model connections on your computer. API keys are used only to call the configured model providers, are saved in the local data directory, and are not included in public sessions, installers or the GitHub source repository.</p>
-      <p>Repository collaboration creates a separate task branch and Git worktree from the repository you select. The app does not upload the whole repository to the download site merely because you selected it, and it does not automatically merge or push the original repository.</p>
-      <p>When clipboard relay is used, the app reads and writes the clipboard and activates the target app you selected during that collaboration. Language preferences use local browser or app storage and do not require account cookies.</p>
-    </section>
-    <section id="cloud"><h2>2. Third-party agents and model providers</h2>
-      <p>Kimi Code, Codex, Claude Code, Kimi, OpenAI, Anthropic and any other providers you configure process prompts, code, diffs, tool results, usage and output under their own rules. A CLI running on your computer does not necessarily mean the model itself runs locally.</p>
-      <p>The data path of Ollama, LM Studio, NInfer, Strata or another OpenAI-compatible endpoint depends on its actual address. If the endpoint is on a LAN or the public internet, content may leave your computer. Third-party retention, training use, pricing and opt-out options are governed by each provider and by your own settings.</p>
-      <p>Submit only code and content you are authorized to use. Do not place passwords, API keys, private keys, unrelated personal information or confidential material in task text, logs, screenshots or GitHub issues.</p>
-    </section>
-    <section id="website"><h2>3. Public download site</h2>
-      <p>The download site provides only project information, open-source links, privacy and terms pages, and a GitHub Releases installer manifest. It does not provide a collaboration workspace, server-side repository operations, accounts, payments or legacy compatibility APIs.</p>
-      <p>The site does not load Google Fonts, third-party JavaScript CDNs, advertising or behavioral analytics. Visiting GitHub source, issues or Releases is processed by GitHub under its own privacy policy.</p>
-      <p>Hosting and reverse-proxy infrastructure may process IP addresses, request times, paths, response status and browser information for security, troubleshooting and abuse prevention. The site does not use an account system to connect those technical logs to a specific user.</p>
-    </section>
-    <section id="retention"><h2>4. Retention and deletion</h2>
-      <p>Local collaboration records, media, model settings and task worktrees have no single automatic expiry. You choose when to back them up or delete them. Quitting or uninstalling the app does not guarantee that those directories are removed.</p>
-      <p>Public technical logs are retained by the hosting environment only as needed for security and operations. PeerGrading does not store account databases, device tokens, memberships, orders or payment records, so there is no corresponding cloud account deletion workflow.</p>
-      <p>We use loopback binding, Host / Origin / CSRF checks, configuration redaction and pre-release secret scanning. No system can guarantee absolute security; protect your computer, CLI sign-ins, API keys and private backups as well.</p>
-    </section>
-    <section id="contact"><h2>5. Issues and policy updates</h2>
-      <p>To report an implementation issue or discuss local-data behavior, open a <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issue</a>. Before posting publicly, remove keys, private code, account information and unnecessary personal data.</p>
-      <p>Material changes to these notes will update the date and be shown on this page. Previous versions can be reviewed through the public repository history.</p>
-    </section>
-    <footer class="legal-footer"><a href="/">Back to home</a><a href="/terms">Terms of Service</a><a href="#content">Back to top</a></footer>
+    <div class="lang-seg" aria-label="Language"><button type="button" data-lang="zh">中文</button><button type="button" data-lang="en">English</button></div>
+    <div data-lang-content="zh">
+      <p class="eyebrow">PRIVACY / 隐私与数据</p><h1>隐私说明</h1>
+      <p class="meta">更新及生效日期：2026 年 10 月 18 日</p>
+      <p class="intro">本说明适用于 PeerGrading 开源桌面软件和 peergrading.ai 下载站。PeerGrading 不提供账号、会员、订单或支付系统，也不要求您创建账号。</p>
+      <aside class="notice" aria-label="重要信息"><strong>本地优先不等于所有数据都留在本机。</strong>任务、会话和模型配置默认保存在您的电脑上；只有您主动选择云端 Agent 或云端模型时，相关任务、代码、成果和讨论才会发送给对应服务商。</aside>
+      <nav class="contents" aria-label="目录"><a href="#local-zh">本机数据</a><a href="#cloud-zh">第三方服务</a><a href="#website-zh">下载站</a><a href="#retention-zh">保存与删除</a><a href="#contact-zh">问题反馈</a></nav>
+      <section id="local-zh"><h2>一、本机数据与您的控制</h2>
+        <p>桌面软件在本机保存任务、Agent 对话、版本、补丁、检查输出、媒体、运行报告以及您选择的模型连接。API Key 仅用于调用对应模型服务，保存在本机数据目录，不进入公开会话、安装包或 GitHub 源码。</p>
+        <p>仓库协作从您选择的 Git 仓库创建独立任务分支和 worktree。软件不会仅因您选择仓库就把整份仓库上传到 PeerGrading 下载站，也不会自动合并或推送原始仓库。</p>
+        <p>使用剪贴板中转时，软件会在该协作过程中读写剪贴板并切换您指定的应用。语言偏好仅使用浏览器或应用的本机存储，不需要账号 Cookie。</p>
+      </section>
+      <section id="cloud-zh"><h2>二、第三方 Agent 与模型服务</h2>
+        <p>Kimi Code、Codex、Claude Code、Kimi、OpenAI、Anthropic 以及您配置的其他接口会按其服务规则处理提示词、代码、差异、工具结果、使用量和输出。即使 CLI 在本机运行，也不代表模型在本机推理。</p>
+        <p>Ollama、LM Studio、NInfer、Strata 或其他本地兼容接口的数据去向取决于实际地址；如果接口指向局域网或公网，内容仍可能离开您的电脑。第三方服务的保存期限、训练使用、费用和退出选项由其政策与您的设置决定。</p>
+        <p>请只提交您有权使用的代码和内容，不要把密码、API Key、私钥、无关个人信息或保密资料放入任务正文、日志、截图或 GitHub issue。</p>
+      </section>
+      <section id="website-zh"><h2>三、公网下载站</h2>
+        <p>下载站只提供项目介绍、开源链接、隐私与条款页面以及 GitHub Releases 安装包清单，不提供协作工作台、服务器仓库操作、账号、支付或旧版兼容 API。</p>
+        <p>网站不加载 Google Fonts、第三方 JS CDN、广告或行为分析脚本。访问 GitHub 源码、issue 或 Release 时，GitHub 按其隐私政策处理您的请求。</p>
+        <p>托管和反向代理可能为安全、故障排查和防止滥用处理 IP 地址、请求时间、路径、响应状态及浏览器信息。本站不通过账号体系把这些技术记录关联到特定用户。</p>
+      </section>
+      <section id="retention-zh"><h2>四、保存期限与删除</h2>
+        <p>本机协作记录、媒体、模型配置和任务 worktree 没有统一的自动到期清理机制，由您自行备份或删除。退出或卸载软件不保证清除这些目录。</p>
+        <p>公网技术日志由托管环境按安全和运维需要限定保存期限。PeerGrading 不保存账号数据库、设备令牌、会员、订单或支付记录，因此不存在对应的云端注销或删除流程。</p>
+        <p>我们采取回环地址限制、Host / Origin / CSRF 校验、配置脱敏和开源发布前秘密扫描等措施。没有系统能保证绝对安全，请同时保护电脑、CLI 登录、API Key 和私人备份。</p>
+      </section>
+      <section id="contact-zh"><h2>五、问题反馈与政策更新</h2>
+        <p>如需报告实现问题或讨论本机数据功能，请通过 <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issue</a> 提交。公开反馈前请移除密钥、私人代码、账号信息和不必要的个人数据。</p>
+        <p>本说明发生实质变化时会更新日期并在项目页面展示。历史版本可通过公开仓库核对。您可保存本页供查阅。</p>
+      </section>
+    </div>
+    <div data-lang-content="en" hidden>
+      <p class="eyebrow">PRIVACY / DATA</p><h1>Privacy Notes</h1>
+      <p class="meta">Updated and effective: October 18, 2026</p>
+      <p class="intro">These notes apply to the PeerGrading open-source desktop app and the peergrading.ai download site. PeerGrading does not provide accounts, memberships, orders or payments, and does not ask you to create an account.</p>
+      <aside class="notice" aria-label="Important information"><strong>Local-first does not mean every byte stays on your computer.</strong> Tasks, sessions and model settings are stored locally by default. Content is sent to a provider only when you choose a cloud agent or cloud model.</aside>
+      <nav class="contents" aria-label="Contents"><a href="#local-en">Local data</a><a href="#cloud-en">Third-party providers</a><a href="#website-en">Download site</a><a href="#retention-en">Retention and deletion</a><a href="#contact-en">Issues and updates</a></nav>
+      <section id="local-en"><h2>1. Local data and your control</h2>
+        <p>The desktop app stores tasks, agent conversations, versions, patches, check output, media, run reports and your selected model connections on your computer. API keys are used only to call the configured model providers, are saved in the local data directory, and are not included in public sessions, installers or the GitHub source repository.</p>
+        <p>Repository collaboration creates a separate task branch and Git worktree from the repository you select. The app does not upload the whole repository to the download site merely because you selected it, and it does not automatically merge or push the original repository.</p>
+        <p>When clipboard relay is used, the app reads and writes the clipboard and activates the target app you selected during that collaboration. Language preferences use local browser or app storage and do not require account cookies.</p>
+      </section>
+      <section id="cloud-en"><h2>2. Third-party agents and model providers</h2>
+        <p>Kimi Code, Codex, Claude Code, Kimi, OpenAI, Anthropic and any other providers you configure process prompts, code, diffs, tool results, usage and output under their own rules. A CLI running on your computer does not necessarily mean the model itself runs locally.</p>
+        <p>The data path of Ollama, LM Studio, NInfer, Strata or another OpenAI-compatible endpoint depends on its actual address. If the endpoint is on a LAN or the public internet, content may leave your computer. Third-party retention, training use, pricing and opt-out options are governed by each provider and by your own settings.</p>
+        <p>Submit only code and content you are authorized to use. Do not place passwords, API keys, private keys, unrelated personal information or confidential material in task text, logs, screenshots or GitHub issues.</p>
+      </section>
+      <section id="website-en"><h2>3. Public download site</h2>
+        <p>The download site provides only project information, open-source links, privacy and terms pages, and a GitHub Releases installer manifest. It does not provide a collaboration workspace, server-side repository operations, accounts, payments or legacy compatibility APIs.</p>
+        <p>The site does not load Google Fonts, third-party JavaScript CDNs, advertising or behavioral analytics. Visiting GitHub source, issues or Releases is processed by GitHub under its own privacy policy.</p>
+        <p>Hosting and reverse-proxy infrastructure may process IP addresses, request times, paths, response status and browser information for security, troubleshooting and abuse prevention. The site does not use an account system to connect those technical logs to a specific user.</p>
+      </section>
+      <section id="retention-en"><h2>4. Retention and deletion</h2>
+        <p>Local collaboration records, media, model settings and task worktrees have no single automatic expiry. You choose when to back them up or delete them. Quitting or uninstalling the app does not guarantee that those directories are removed.</p>
+        <p>Public technical logs are retained by the hosting environment only as needed for security and operations. PeerGrading does not store account databases, device tokens, memberships, orders or payment records, so there is no corresponding cloud account deletion workflow.</p>
+        <p>We use loopback binding, Host / Origin / CSRF checks, configuration redaction and pre-release secret scanning. No system can guarantee absolute security; protect your computer, CLI sign-ins, API keys and private backups as well.</p>
+      </section>
+      <section id="contact-en"><h2>5. Issues and policy updates</h2>
+        <p>To report an implementation issue or discuss local-data behavior, open a <a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer">GitHub issue</a>. Before posting publicly, remove keys, private code, account information and unnecessary personal data.</p>
+        <p>Material changes to these notes will update the date and be shown on this page. Previous versions can be reviewed through the public repository history.</p>
+      </section>
+    </div>
+    <footer class="legal-footer"><a href="/">返回首页 / Home</a><a href="/terms">服务条款 / Terms</a><a href="#content">回到顶部 / Top</a></footer>
   </main>
+  <script>
+    (() => {
+      const buttons = document.querySelectorAll("[data-lang]");
+      const panels = document.querySelectorAll("[data-lang-content]");
+      const setLanguage = (lang) => {
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        panels.forEach((panel) => { panel.hidden = panel.dataset.langContent !== lang; });
+        buttons.forEach((button) => button.classList.toggle("active", button.dataset.lang === lang));
+        try { localStorage.setItem("lang", lang); } catch {}
+      };
+      buttons.forEach((button) => button.addEventListener("click", () => setLanguage(button.dataset.lang)));
+      let initial = "zh";
+      try { initial = localStorage.getItem("lang") || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en"); } catch {}
+      setLanguage(initial === "en" ? "en" : "zh");
+    })();
+  </script>
 </body>
 </html>
