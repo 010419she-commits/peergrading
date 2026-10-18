@@ -5,13 +5,7 @@
   if (!root) return;
 
   const dictionaries = window.SITE_I18N || {};
-  const lang = (() => {
-    try {
-      const saved = localStorage.getItem("lang");
-      if (saved === "zh" || saved === "en") return saved;
-    } catch {}
-    return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
-  })();
+  const lang = "en";
   const t = (key) => dictionaries[lang]?.[key] ?? dictionaries.zh?.[key] ?? key;
   const status = root.querySelector("#loop-status");
   const title = root.querySelector("#loop-stage-title");
