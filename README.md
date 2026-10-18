@@ -37,6 +37,8 @@ PeerGrading 是一个以 [MIT](LICENSE) 发布的开源双 Agent 协作工具。
 
 每个 Release 同时提供 `SHA256SUMS`。macOS 可用 `shasum -a 256 <文件>`，Windows 可用 `certutil -hashfile <文件> SHA256` 后对照清单。
 
+Windows 安装程序使用安装向导，可查看并更改安装目录，并默认创建 PeerGrading 桌面和开始菜单快捷方式。
+
 macOS 是否签名和公证取决于 Release Runner 实际配置的 Apple 凭证；没有凭证时，项目不会把产物描述为已签名或已公证。不要仅凭下载页面推断签名状态，也不要用绕过 Gatekeeper 的方式替代可信发布。
 
 桌面应用不需要 PeerGrading 账号。所选的 Kimi Code、Codex、Claude Code 等 CLI 可能需要各自登录，云 API 也可能由供应商计费；这些是第三方服务要求，不是 PeerGrading 会员或付费墙。

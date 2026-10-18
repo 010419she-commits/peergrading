@@ -1,6 +1,6 @@
 {
   "name": "peergrading",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "license": "MIT",
   "author": "PeerGrading contributors",
@@ -77,6 +77,13 @@
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PeerGrading"
     },
     "dmg": {
       "title": "PeerGrading"
