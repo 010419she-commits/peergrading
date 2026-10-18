@@ -2,19 +2,13 @@
 (() => {
   "use strict";
   const dictionaries = window.SITE_I18N || {};
-  const lang = (() => {
-    try {
-      const saved = localStorage.getItem("lang");
-      if (saved === "zh" || saved === "en") return saved;
-    } catch {}
-    return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
-  })();
+  const lang = "en";
   const t = (key) => dictionaries[lang]?.[key] ?? dictionaries.zh?.[key] ?? key;
   const make = (tag, props = {}, ...children) => {
     const node = document.createElement(tag);
     Object.assign(node, props); node.append(...children); return node;
   };
-  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.documentElement.lang = "en";
   document.title = t("homePageTitle");
   document.querySelector('meta[name="description"]')?.setAttribute("content", t("homeDescription"));
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });

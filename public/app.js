@@ -1,5 +1,5 @@
 const $ = (s) => document.querySelector(s);
-let lang = (() => { try { return localStorage.getItem("lang") || (navigator.language.startsWith("zh") ? "zh" : "en"); } catch { return "zh"; } })();
+let lang = "en";
 const t = (k) => window.I18N[lang][k];
 const IS_WIN = /Windows/i.test(navigator.userAgent);   // 粘贴快捷键提示用
 
