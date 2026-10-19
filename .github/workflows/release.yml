@@ -4,12 +4,21 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to rebuild with the current release workflow
+        required: true
+        default: v0.6.5
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -45,6 +54,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - name: Validate requested release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a vMAJOR.MINOR.PATCH tag'; exit 1; }
+      - name: Preserve current signing helper for existing tags
+        if: runner.os == 'macOS'
+        shell: bash
+        run: cp scripts/macos-signing.mjs "$RUNNER_TEMP/peergrading-macos-signing.mjs"
+      - name: Check out the requested release source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -55,7 +77,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           EXPECTED_VERSION="$version" node -e 'const pkg = require("./package.json"); if (pkg.version !== process.env.EXPECTED_VERSION) { console.error(`Tag version ${process.env.EXPECTED_VERSION} does not match package.json ${pkg.version}`); process.exit(1); }'
       - name: Build shared bundles
         run: npm run bundle
@@ -78,10 +100,7 @@ jobs:
 
           if [ -n "$CSC_LINK" ]; then
             echo 'CSC_IDENTITY_AUTO_DISCOVERY=true' >> "$GITHUB_ENV"
-            echo "CSC_LINK=$CSC_LINK" >> "$GITHUB_ENV"
-            if [ -n "$CSC_KEY_PASSWORD" ]; then
-              echo "CSC_KEY_PASSWORD=$CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
-            fi
+            node "$RUNNER_TEMP/peergrading-macos-signing.mjs" prepare
           else
             echo '::warning::No Developer ID certificate secret; this macOS asset will be unsigned.'
           fi
@@ -131,14 +150,38 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          signing_args=()
+          if [ -n "${CSC_KEYCHAIN:-}" ]; then
+            signing_args+=(--config.forceCodeSigning=true)
+          fi
           npx electron-builder --mac "${{ matrix.arch_flag }}" --publish never \
             --config.directories.output="release/${{ matrix.platform }}-${{ matrix.arch }}" \
-            --config.mac.target=dmg --config.mac.notarize="$MAC_NOTARIZE"
+            --config.mac.target=dmg --config.mac.notarize="$MAC_NOTARIZE" "${signing_args[@]}"
+      - name: Verify Developer ID signature and notarization ticket
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CSC_KEYCHAIN:-}" ]; then
+            echo 'No signing credentials configured; no signed/notarized claim is made.'
+            exit 0
+          fi
+          output="release/${{ matrix.platform }}-${{ matrix.arch }}"
+          app=$(find "$output" -maxdepth 2 -type d -name 'PeerGrading.app' -print -quit)
+          test -n "$app"
+          codesign --verify --deep --strict "$app"
+          codesign --display --verbose=4 "$app" 2> "$RUNNER_TEMP/peergrading-signature.txt"
+          grep -q '^Authority=Developer ID Application:' "$RUNNER_TEMP/peergrading-signature.txt"
+          echo 'Developer ID Application signature verified.'
+          if [ "$MAC_NOTARIZE" = true ]; then
+            xcrun stapler validate "$app"
+            echo 'Stapled notarization ticket verified.'
+          fi
       - name: Stage installer with an explicit OS and architecture name
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           output="release/${{ matrix.platform }}-${{ matrix.arch }}"
           count=$(find "$output" -maxdepth 1 -type f -name "*.${{ matrix.extension }}" | wc -l | tr -d ' ')
           if [ "$count" -ne 1 ]; then
@@ -149,6 +192,14 @@ jobs:
           mkdir -p artifacts
           asset="PeerGrading-${version}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}"
           cp "$installer" "artifacts/$asset"
+      - name: Clean up temporary signing material
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/peergrading-macos-signing.mjs" ]; then
+            node "$RUNNER_TEMP/peergrading-macos-signing.mjs" cleanup
+          fi
+          rm -f "$RUNNER_TEMP/PeerGrading-AuthKey.p8" "$RUNNER_TEMP/peergrading-signature.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: peergrading-${{ matrix.platform }}-${{ matrix.arch }}
@@ -161,6 +212,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -182,7 +235,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
           assets=$(find release-assets -maxdepth 1 -type f | sort)
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" $assets --clobber

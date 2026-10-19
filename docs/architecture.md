@@ -42,3 +42,11 @@ PeerGrading 0.6.0 将本地协作与公网下载站点拆成两个运行入口�
 4. 公网部署只同步站点源码和配置，在服务器重新构建并运行 `dist/site-server.mjs`，随后执行首页、安装包索引及旧 API 404 检查。
 
 macOS 签名和公证不是由文件名推断的：只有构建 Runner 实际具备相应凭证时才能发生。缺少凭证的产物不得宣称已签名或已公证。
+
+### macOS 签名与已有版本重建
+
+Release Runner 将 `CSC_LINK`（Base64 编码的 P12）和 `CSC_KEY_PASSWORD` 导入临时钥匙串。P12 密码只用于证书导入；钥匙串创建、解锁和 `set-key-partition-list` 使用另一份随机密码。签名助手验证 Developer ID Application 身份后，通过 `CSC_KEYCHAIN` 交给 Electron Builder，同时清空 `CSC_LINK`，避开其自动导入路径。构建结束后删除临时钥匙串和公证私钥文件，密码不写入构建日志或产物。
+
+发布前实际运行 `codesign --verify --deep --strict`；启用公证时还必须通过 `xcrun stapler validate` 检查应用携带的票据。不能仅凭上传资产成功声称签名或公证成功。对应模拟测试覆盖两种密码的用途、失败时不导出环境变量、临时材料清理及原钥匙串列表保留。
+
+已存在的 `vMAJOR.MINOR.PATCH` 标签可从默认分支手动触发 Release 工作流重建：保留当前工作流的签名助手，再检出指定标签源码，校验标签与包版本，构建四个平台/架构并发布校验清单。这不移动或重写原标签；用于恢复签名或构建基础设施故障。只有资产发布及校验成功后，才更新官网下载索引。
