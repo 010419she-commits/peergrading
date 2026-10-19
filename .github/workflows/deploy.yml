@@ -63,6 +63,7 @@ jobs:
           set -euo pipefail
           base="https://peergrading.ai"
           curl -fsS --retry 10 --retry-delay 5 --retry-connrefused -o /dev/null "$base/"
+          curl -fsS --retry 3 --retry-delay 2 -o /dev/null "$base/site-theme.js"
           curl -fsS --retry 3 --retry-delay 2 "$base/installers.json" | node -e '
             let body = "";
             process.stdin.on("data", chunk => { body += chunk; });
@@ -84,3 +85,6 @@ jobs:
           }
           expect_404 GET /api/download/latest
           expect_404 POST /api/device/start
+          expect_404 GET /app
+          expect_404 GET /app.js
+          expect_404 GET /theme.js

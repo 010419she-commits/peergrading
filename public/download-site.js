@@ -30,6 +30,20 @@
       location.reload();
     });
   });
+  const themeButton = document.getElementById("site-theme-toggle");
+  const updateThemeButton = () => {
+    if (!themeButton) return;
+    const dark = document.documentElement.dataset.theme === "dark";
+    const label = t(dark ? "themeToLight" : "themeToDark");
+    themeButton.setAttribute("aria-label", label);
+    themeButton.setAttribute("title", label);
+    themeButton.setAttribute("aria-pressed", String(dark));
+  };
+  if (themeButton && window.PeerGradingSiteTheme) {
+    themeButton.addEventListener("click", () => window.PeerGradingSiteTheme.toggle());
+    window.addEventListener("site-theme-change", updateThemeButton);
+    updateThemeButton();
+  }
   document.getElementById("year").textContent = String(new Date().getFullYear());
 
   const downloads = document.getElementById("downloads");
@@ -81,7 +95,8 @@
       addMetadata(t("dlArchitecture"), item.arch);
       if (item.size) addMetadata(t("dlSize"), formatSize(item.size));
       if (item.sha256) addMetadata(t("dlSha256"), item.sha256, true);
-      links.append(make("div", { className: "installer" }, button, make("p", { className: "fine installer-file", textContent: item.name }), metadata));
+      const details = make("details", { className: "installer-details" }, make("summary", { textContent: t("dlDetails") }), metadata);
+      links.append(make("div", { className: "installer" }, button, make("p", { className: "fine installer-file", textContent: item.name }), details));
     }
     if (!installers.length) links.append(make("p", { className: "muted", textContent: t("dlSoon") }));
     card.append(links);

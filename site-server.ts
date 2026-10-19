@@ -13,6 +13,7 @@ const publicFiles = new Map(Object.entries({
   "/terms.html": "terms.html",
   "/site.css": "site.css",
   "/site-i18n.js": "site-i18n.js",
+  "/site-theme.js": "site-theme.js",
   "/download-site.js": "download-site.js",
   "/collaboration-demo.js": "collaboration-demo.js",
   "/legal.css": "legal.css",

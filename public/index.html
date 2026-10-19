@@ -1,164 +1,86 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#10141b">
-  <meta name="description" content="PeerGrading 是 MIT 许可的开源桌面软件：本地与云端 Agent 互相审查，云端辅助通过任务级并行预审与精确缓存减少整体等待。无需 PeerGrading 登录，直接下载或自托管。">
-  <title>PeerGrading · 开源本地与云端互审</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f7f2">
+  <meta name="description" content="两个 Agent，一起把想法做好。PeerGrading 是 MIT 开源、本地优先的双 Agent 协作桌面软件，全新极简聊天工作区，支持日间与夜间模式。">
+  <title>PeerGrading · 两个 Agent，一起把想法做好</title>
+  <script src="/site-theme.js"></script>
   <link rel="stylesheet" href="/site.css">
+  <link rel="icon" href="/icon.png">
 </head>
 <body class="download-site">
   <a class="skip-link" href="#main" data-i18n="skip">跳到主要内容</a>
-  <header class="site-header" id="site-header">
-    <div class="wrap header-inner">
-      <a class="brand" href="#main" aria-label="PeerGrading">
-        <img src="/icon.png" alt="" width="32" height="32">
-        <span class="brand-name">PeerGrading</span>
-      </a>
-      <nav class="primary-nav" id="primary-nav" aria-label="主导航">
-        <a href="#hybrid" data-i18n="hybridNav">本地 × 云端</a>
-        <a href="#acceleration" data-i18n="accelerationNav">云端辅助</a>
-        <a href="#repository" data-i18n="homeNavRepository">仓库协作</a>
-        <a href="#open-source" data-i18n="openSourceNav">开源与自托管</a>
-        <a href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceNav">GitHub 源码</a>
-      </nav>
-      <div class="header-right">
-        <div class="lang-seg" aria-label="Language"><button type="button" data-lang="zh">中文</button><button type="button" data-lang="en">EN</button></div>
-        <a class="button small button-primary header-download" href="#download" data-i18n="navDownload">下载</a>
-        <button class="button menu-toggle" id="menu-toggle" type="button" aria-controls="mobile-menu" aria-expanded="false" hidden data-i18n="menu">菜单</button>
-      </div>
+  <header class="site-header" id="site-header"><div class="wrap header-inner">
+    <a class="brand" href="#main" aria-label="PeerGrading"><img src="/icon.png" alt="" width="28" height="28"><span>PeerGrading</span></a>
+    <nav class="primary-nav" id="primary-nav" aria-label="主导航" data-i18n-aria="primaryNav"><a href="#workspace" data-i18n="workspaceNav">工作区</a><a href="#hybrid" data-i18n="hybridNav">双 Agent 协作</a><a href="#open-source" data-i18n="openSourceNav">开源</a></nav>
+    <div class="header-right">
+      <button class="icon-button theme-toggle" id="site-theme-toggle" type="button" aria-label="切换到夜间模式" aria-pressed="false"><svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20.5 13.6A8.7 8.7 0 0 1 10.4 3.5a8.7 8.7 0 1 0 10.1 10.1Z"/></svg><svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button>
+      <div class="lang-seg" aria-label="Language"><button type="button" data-lang="zh">中</button><button type="button" data-lang="en">EN</button></div>
+      <a class="button button-primary small header-download" href="#download" data-i18n="navDownload">下载</a>
+      <button class="icon-button menu-toggle" id="menu-toggle" type="button" aria-controls="mobile-menu" aria-expanded="false" hidden aria-label="打开菜单" data-i18n-aria="menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     </div>
-  </header>
-
+  </div></header>
   <main id="main" tabindex="-1">
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="wrap hero-layout">
-        <div class="hero-copy">
-          <p class="eyebrow" data-i18n="heroEyebrow">MIT 开源 · 本地 × 云端互审 · 无需登录</p>
-          <h1 id="hero-title" data-i18n-html="heroTitle">让本地与云端 Agent，<br>在协作中<span>持续改进</span>。</h1>
-          <p class="lead" data-i18n="heroLead">本地部署 Agent 与云端大模型 Agent 围绕同一份成果互相审查、交换角色；云端辅助通过任务级并行预审与精确缓存减少整体等待。完全开源，无需 PeerGrading 账号。</p>
-          <div class="hero-actions">
-            <a class="button button-primary" href="#download"><span data-i18n="heroCta">下载桌面软件</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 14v3h12v-3"></path></svg></a>
-            <a class="text-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer"><span data-i18n="sourceNav">查看 GitHub 源码</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4"></path></svg></a>
-          </div>
-          <p class="hero-platforms">macOS · Windows <span aria-hidden="true">/</span> <span data-i18n="homeRunsLocally">直接下载，也可自托管</span></p>
-        </div>
-        <div class="repo-demo hybrid-hero-demo" aria-label="本地与云端协作示意" data-i18n-aria="homeDemoLabel">
-          <div class="repo-demo-top"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span data-i18n="homeDemoTitle">本地与云端协作示意</span><span class="demo-live"><i aria-hidden="true"></i> LOCAL ⇄ CLOUD</span></div>
-          <div class="repo-demo-body">
-            <p class="hybrid-hero-task" data-i18n="hybridHeroTask">示例任务：完善订单校验方案</p>
-            <div class="demo-agent"><span class="agent-letter">A</span><div><strong data-i18n="hybridLocalTitle">本地部署 Agent</strong><small>Ollama / LM Studio</small></div><span class="demo-role" data-i18n="homeDemoAuthor">生成初稿</span></div>
-            <p class="hybrid-hero-draft" data-i18n="hybridHeroDraft">初稿：补充零数量与空购物车的处理规则。</p>
-            <div class="hybrid-handoff" aria-hidden="true"><span>↓</span><span>↑</span></div>
-            <div class="demo-agent"><span class="agent-letter secondary">B</span><div><strong data-i18n="hybridCloudTitle">云端大模型 Agent</strong><small data-i18n="homeDemoReview">审查与讨论</small></div><span class="demo-role" data-i18n="homeDemoDiscuss">提出反馈</span></div>
-            <p class="demo-review" data-i18n="homeDemoFeedback">边界情况已列出。我会接手修订下一版，再交给本地 Agent 复审。</p>
-            <div class="demo-result"><span><i aria-hidden="true">↻</i> <span data-i18n="homeDemoNext">云端修订 → 本地复审 → 继续循环</span></span></div>
-          </div>
-          <div class="repo-demo-foot"><span data-i18n="homeDemoFoot">文字 / 代码成果模式 · 流程示意</span><span aria-hidden="true">A ⇄ B</span></div>
-        </div>
-        <div class="hero-bottom"><span data-i18n="heroBottom1">本地与云端自由搭档</span><span data-i18n="heroBottom2">互相审查与交换角色</span><span data-i18n="heroBottom3">多轮迭代，由你决定结束</span></div>
-      </div>
-    </section>
-
-    <section class="section hybrid-section" id="hybrid" tabindex="-1" aria-labelledby="hybrid-title">
-      <div class="wrap">
-        <div class="section-head"><div><p class="eyebrow" data-i18n="hybridNav">本地 × 云端</p><h2 id="hybrid-title" data-i18n-html="hybridTitle">本地与云端，<br>进入同一个协作循环。</h2></div><p class="lead" data-i18n="hybridLead">把两种部署方式接到同一项任务里。彼此审查、讨论，再交换作者与审查者的角色，让成果在来回协作中逐步完善。</p></div>
-        <div class="collaboration-demo" id="collaboration-demo" data-demo-stage="0" role="group" aria-label="协作循环交互演示" data-i18n-aria="hybridDemoLabel">
-          <div class="hybrid-agents">
-            <article class="hybrid-agent local-agent is-active" data-loop-actor="local">
-              <div class="hybrid-agent-top"><span class="hybrid-agent-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5" y="5" width="22" height="16" rx="2"/><path d="M12 26h8m-4-5v5M10 11l3 3-3 3m6 0h5"/></svg></span><span class="hybrid-location" data-i18n="hybridLocalTag">在你的设备推理</span></div>
-              <h3 data-i18n="hybridLocalTitle">本地部署 Agent</h3><p class="hybrid-models">Ollama / LM Studio</p><p data-i18n="hybridLocalBody">使用本地部署的模型，参与起草、讨论与复审。</p>
-            </article>
-            <div class="hybrid-exchange"><span aria-hidden="true">⇄</span><p data-i18n="hybridExchange">成果与反馈<br>双向传递</p></div>
-            <article class="hybrid-agent cloud-agent" data-loop-actor="cloud">
-              <div class="hybrid-agent-top"><span class="hybrid-agent-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 23a6 6 0 0 1-1-12 8 8 0 0 1 15-1 6.5 6.5 0 0 1 0 13H9Z"/><path d="M12 17h8m-4-4v8"/></svg></span><span class="hybrid-location" data-i18n="hybridCloudTag">通过已配置服务连接</span></div>
-              <h3 data-i18n="hybridCloudTitle">云端大模型 Agent</h3><p class="hybrid-models">Kimi / Codex / Claude</p><p data-i18n="hybridCloudBody">连接已接入的云端命令行 Agent 或 API，参与审查、讨论与修订。</p>
-            </article>
-          </div>
-          <div class="hybrid-loop">
-            <div class="hybrid-loop-heading"><h3 data-i18n="hybridLoopTitle">同一份成果，来回打磨</h3><span class="hybrid-loop-mark" aria-hidden="true">A → B → B → A ↻</span></div>
-            <ol class="loop-steps">
-              <li><button type="button" class="is-active" data-loop-step="0" aria-pressed="true" aria-controls="loop-stage" disabled><span class="loop-step-number" aria-hidden="true">01</span><span data-i18n="hybridStep1">本地起草</span></button></li>
-              <li><button type="button" data-loop-step="1" aria-pressed="false" aria-controls="loop-stage" disabled><span class="loop-step-number" aria-hidden="true">02</span><span data-i18n="hybridStep2">云端审查</span></button></li>
-              <li><button type="button" data-loop-step="2" aria-pressed="false" aria-controls="loop-stage" disabled><span class="loop-step-number" aria-hidden="true">03</span><span data-i18n="hybridStep3">云端修订</span></button></li>
-              <li><button type="button" data-loop-step="3" aria-pressed="false" aria-controls="loop-stage" disabled><span class="loop-step-number" aria-hidden="true">04</span><span data-i18n="hybridStep4">本地复审</span></button></li>
-            </ol>
-            <div class="loop-stage" id="loop-stage" aria-live="polite" aria-atomic="true"><p class="loop-status" id="loop-status">第 1 轮 · 步骤 1 / 4</p><h4 id="loop-stage-title" data-i18n="hybridStage1Title">本地 Agent 生成初稿</h4><p id="loop-stage-copy" data-i18n="hybridStage1Body">从同一项任务开始，由本地模型产出第一版文字或代码成果，交给云端 Agent 审查。</p></div>
-            <div class="loop-controls" id="loop-controls" hidden><button class="button button-primary small" id="loop-next" type="button" data-i18n="hybridNext">下一步</button><button class="text-link" id="loop-reset" type="button" data-i18n="hybridReset">重新演示</button><p data-i18n="hybridDemoNote">流程演示，不会调用模型或上传内容。</p></div>
+    <section class="hero" aria-labelledby="hero-title"><div class="wrap">
+      <p class="release-pill"><span class="status-dot" aria-hidden="true"></span><span data-i18n="heroEyebrow">全新聊天工作区 · 日间 / 夜间</span></p>
+      <h1 id="hero-title" data-i18n-html="heroTitle">两个 Agent，<br>一起把想法做好。</h1>
+      <p class="hero-lead" data-i18n-html="heroLead">从一句想法开始，让两个 AI 轮流创作、审查与改进。<br>留白多一点，专注多一点，决定权始终在你。</p>
+      <div class="hero-actions"><a class="button button-primary" href="#download"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 2v11m-4-4 4 4 4-4M3 14v3h14v-3"/></svg><span data-i18n="heroCta">下载桌面软件</span></a><a class="button button-secondary" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer"><span data-i18n="sourceNav">GitHub 源码</span><span aria-hidden="true">↗</span></a></div>
+      <p class="hero-platforms">Windows · macOS <span aria-hidden="true">/</span> <span data-i18n="heroFootnote">MIT 开源，无需 PeerGrading 账号</span></p>
+      <figure class="workspace-preview" id="workspace" tabindex="-1" aria-labelledby="preview-caption">
+        <div class="preview-window" role="img" aria-label="极简聊天工作区界面示意：双 Agent 在居中的对话中轮流创作和审查，底部输入任务，侧边查看历史和成果。" data-i18n-aria="previewLabel">
+          <aside class="preview-rail" aria-hidden="true"><img src="/icon.png" width="27" height="27" alt=""><span class="rail-icon rail-new">＋</span><span class="rail-icon rail-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 3v-3H3V6a2 2 0 0 1 2-2Z"/></svg></span><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h6l2 2h8v11H4V7Zm0 0V4h6l2 3h8v2"/></svg></span><span class="rail-spacer"></span><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></svg></span><span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.5 13.6A8.7 8.7 0 0 1 10.4 3.5a8.7 8.7 0 1 0 10.1 10.1Z"/></svg></span></aside>
+          <div class="preview-main">
+            <div class="preview-topbar"><span data-i18n="previewTaskTitle">让订单校验更清晰</span><span class="preview-topbar-note" data-i18n="previewLocal">本地工作区</span><span aria-hidden="true">···</span></div>
+            <div class="preview-conversation">
+              <div class="preview-task" data-i18n="previewTask">帮我完善订单校验，别漏掉边界情况。</div>
+              <div class="preview-message"><span class="agent-avatar">A</span><div><div class="message-heading"><strong data-i18n="previewAuthor">作者</strong><span data-i18n="previewAgentLocal">本地 Agent</span></div><p data-i18n="previewDraft">我会先梳理数量、金额和空订单的处理，再整理一版清晰的校验方案。</p><div class="preview-artifact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h4M9 12h6m-6 4h6"/></svg><div><strong data-i18n="previewArtifact">订单校验方案</strong><span data-i18n="previewVersion">第一版 · 可查看成果</span></div><span aria-hidden="true">↗</span></div></div></div>
+              <div class="preview-message"><span class="agent-avatar reviewer">B</span><div><div class="message-heading"><strong data-i18n="previewReviewer">审查者</strong><span data-i18n="previewAgentCloud">云端 Agent</span></div><p data-i18n="previewReview">建议补充重复提交和价格变动的情况。我来接手修订，再请 A 复审。</p></div></div>
+              <div class="preview-progress"><span class="status-dot" aria-hidden="true"></span><span data-i18n="previewProgress">交换角色，继续打磨下一版</span></div>
+            </div>
+            <div class="preview-composer"><p data-i18n="previewPlaceholder">下一件想一起完成的事…</p><div><span class="preview-model"><span class="status-dot" aria-hidden="true"></span><span data-i18n="previewPair">两个 Agent · 轮流协作</span></span><span class="preview-send" aria-hidden="true">↑</span></div></div><p class="preview-bottom" data-i18n="previewBottom">你的想法，他们一起完善。</p>
           </div>
         </div>
-        <p class="hybrid-control-note"><span aria-hidden="true">↳</span><span data-i18n="hybridControlNote">可设轮次上限，达到共识后结束，也可手动停止。最终成果由你审阅。</span></p>
-        <details class="hybrid-setup"><summary data-i18n="hybridSetupTitle">接入说明</summary><div><p data-i18n="hybridSetupLocal">桌面软件会自动识别本地模型，无需填写接口地址或连接名称；请先启动 Ollama 或 LM Studio 并加载模型。</p><p data-i18n="hybridSetupModes">本地模型用于文字与代码成果协作；直接修改现有 Git 仓库使用 Kimi Code、Codex 或 Claude Code CLI。</p><p data-i18n="hybridSetupData">与云端协作时，任务、成果和相关讨论会发送至所选服务。使用前请确认服务配置。</p></div></details>
+        <figcaption id="preview-caption"><span data-i18n="previewCaption">聊天工作区界面示意 · 示例内容，未调用模型</span><span class="preview-themes" data-i18n="previewThemeHint">试试右上角的日夜切换 ↗</span></figcaption>
+      </figure>
+      <div class="hero-bottom"><span data-i18n="heroBottom1">本地优先</span><span data-i18n="heroBottom2">双 Agent 互审</span><span data-i18n="heroBottom3">成果与版本留在本机</span></div>
+    </div></section>
+    <section class="section" id="hybrid" tabindex="-1" aria-labelledby="hybrid-title"><div class="wrap">
+      <div class="section-head"><p class="eyebrow" data-i18n="hybridNav">双 Agent 协作</p><h2 id="hybrid-title" data-i18n="hybridTitle">一个起草，一个多想一步。</h2><p class="lead" data-i18n="hybridLead">本地模型、云端 API 或命令行 Agent，自由搭档。围绕同一份成果交换意见，再交换角色，把下一版继续做好。</p></div>
+      <div class="collaboration-demo" id="collaboration-demo" data-demo-stage="0" role="group" aria-label="协作循环交互演示" data-i18n-aria="hybridDemoLabel">
+        <div class="hybrid-agents"><div class="hybrid-agent is-active" data-loop-actor="local"><span class="agent-avatar">A</span><div><strong data-i18n="hybridLocalTitle">本地部署 Agent</strong><span>Ollama / LM Studio</span></div></div><span class="exchange-mark" aria-hidden="true">⇄</span><div class="hybrid-agent" data-loop-actor="cloud"><span class="agent-avatar reviewer">B</span><div><strong data-i18n="hybridCloudTitle">云端大模型 Agent</strong><span>Kimi / Codex / Claude</span></div></div></div>
+        <ol class="loop-steps"><li><button type="button" class="is-active" data-loop-step="0" aria-pressed="true" aria-controls="loop-stage" disabled><span aria-hidden="true">01</span><span data-i18n="hybridStep1">本地起草</span></button></li><li><button type="button" data-loop-step="1" aria-pressed="false" aria-controls="loop-stage" disabled><span aria-hidden="true">02</span><span data-i18n="hybridStep2">云端审查</span></button></li><li><button type="button" data-loop-step="2" aria-pressed="false" aria-controls="loop-stage" disabled><span aria-hidden="true">03</span><span data-i18n="hybridStep3">云端修订</span></button></li><li><button type="button" data-loop-step="3" aria-pressed="false" aria-controls="loop-stage" disabled><span aria-hidden="true">04</span><span data-i18n="hybridStep4">本地复审</span></button></li></ol>
+        <div class="loop-stage" id="loop-stage" aria-live="polite" aria-atomic="true"><p class="loop-status" id="loop-status">第 1 轮 · 步骤 1 / 4</p><h3 id="loop-stage-title" data-i18n="hybridStage1Title">本地 Agent 生成初稿</h3><p id="loop-stage-copy" data-i18n="hybridStage1Body">从同一项任务开始，由本地模型产出第一版文字或代码成果，交给云端 Agent 审查。</p></div>
+        <div class="loop-controls" id="loop-controls" hidden><button class="button button-primary small" id="loop-next" type="button" data-i18n="hybridNext">下一步</button><button class="text-link" id="loop-reset" type="button" data-i18n="hybridReset">重新演示</button><p data-i18n="hybridDemoNote">流程演示，不会调用模型或上传内容。</p></div>
       </div>
-    </section>
-
-    <section class="section acceleration-section" id="acceleration" tabindex="-1" aria-labelledby="acceleration-title">
-      <div class="wrap">
-        <div class="section-head"><div><p class="eyebrow" data-i18n="accelerationNav">云端辅助加速</p><h2 id="acceleration-title" data-i18n-html="accelerationTitle">减少整体等待，<br>不夸大为 token 级加速。</h2></div><p class="lead" data-i18n="accelerationLead">加速发生在任务调度和应用层缓存：并行准备独立审查、复用完全匹配的结果。它不改变模型生成 token 的速度，也不承诺供应商内部共享计算。</p></div>
-        <div class="acceleration-grid">
-          <article class="acceleration-card speculative-card"><span class="acceleration-index" aria-hidden="true">01 / PARALLEL</span><h3 data-i18n="accelerationSpeculativeTitle">任务级并行预审</h3><p data-i18n="accelerationSpeculativeBody">预审只读取绑定的完整快照。采纳前重新核对当前快照 SHA-256；失配、失败或过期结果会丢弃并回退，不会套用到新版本。</p></article>
-          <article class="acceleration-card cache-card"><span class="acceleration-index" aria-hidden="true">02 / EXACT CACHE</span><h3 data-i18n="accelerationCacheTitle">精确缓存</h3><p data-i18n="accelerationCacheBody">缓存键覆盖快照内容、模型、角色和审查上下文等全部有效输入。只有完全匹配且完整性校验通过才复用，不用相似文本猜测命中。</p></article>
-        </div>
-        <p class="acceleration-note" data-i18n="accelerationNote">这里减少的是串行等待和完全相同的重复审查，不减少必要审查、测试或通过条件。界面只显示启动、采用、回退、缓存命中和重叠时间等状态，不展示候选正文或 reasoning。</p>
+      <p class="section-note" data-i18n="hybridControlNote">设置轮次上限，随时停止，最终成果由你审阅。使用云模型时，相关内容会发送到你选择的服务。</p>
+    </div></section>
+    <section class="section details-section" aria-labelledby="features-title"><div class="wrap">
+      <div class="section-head"><p class="eyebrow" data-i18n="featuresEyebrow">简单的界面，认真做事</p><h2 id="features-title" data-i18n="featuresTitle">把注意力留给值得做的事。</h2></div>
+      <div class="feature-grid">
+        <article class="feature-card"><span class="feature-number">01</span><h3 data-i18n="chatTitle">像聊天一样开始</h3><p data-i18n="chatBody">任务输入放在底部，协作过程居中展开。历史、模型配置与成果按需打开，日间和夜间一键切换并记住选择。</p></article>
+        <article class="feature-card" id="repository"><span class="feature-number">02</span><h3 data-i18n="repositoryTitle">接着你的工程往下做</h3><p data-i18n="repositoryBody">通过 Kimi Code、Codex 或 Claude Code CLI，在独立 Git worktree 中编辑真实文件，保留差异、提交与验证记录，由你审阅后合并。</p><p class="fine" data-i18n="repositoryNote">worktree 隔离文件与分支；验证命令仍以本机用户权限运行。</p></article>
+        <article class="feature-card" id="acceleration"><span class="feature-number">03</span><h3 data-i18n="accelerationTitle">少一点重复等待</h3><p data-i18n="accelerationBody">完整快照支持并行预审，采纳前核对 SHA-256。精确缓存只复用全部有效输入完全一致的结果，不跳过审查和验证。</p><p class="fine" data-i18n="accelerationNote">加速来自任务调度与应用层缓存，不承诺 token / KV 级共享计算。</p></article>
       </div>
-    </section>
-
-    <section class="section intro" id="repository" tabindex="-1" aria-labelledby="repository-title">
-      <div class="wrap">
-        <div class="intro-grid">
-          <div><p class="eyebrow" data-i18n="homeNavRepository">仓库协作</p><h2 id="repository-title" data-i18n-html="approachTitle">从你已有的工程，<br>接着往下做。</h2></div>
-          <div class="intro-copy"><p class="lead" data-i18n="approachLead1">修复一个 bug、补齐一项功能，或者整理一段代码。不必新建项目，把任务交给两个已经安装并登录的命令行 Agent。</p><p class="lead" data-i18n="approachLead2">软件从当前提交创建独立分支与 worktree。两个 Agent 在其中轮流工作，你的原工作区保持原样，最后由你决定是否合并。</p></div>
-        </div>
-        <ol class="principles">
-          <li class="principle"><span class="principle-number" aria-hidden="true">01 / EDIT</span><h3 data-i18n="p1t">改的是实际工程</h3><p data-i18n="p1d">读取仓库里的代码，编辑真实文件。仓库模式支持 Kimi Code、Codex 或 Claude Code CLI，沿用你已经登录的账号。</p></li>
-          <li class="principle"><span class="principle-number" aria-hidden="true">02 / REVIEW</span><h3 data-i18n="p2t">看差异，再提意见</h3><p data-i18n="p2d">审查者读取累计代码差异，指出具体问题并与作者讨论；需要修改时交换角色，继续下一版。</p></li>
-          <li class="principle"><span class="principle-number" aria-hidden="true">03 / VERIFY</span><h3 data-i18n="p3t">检查与提交都有记录</h3><p data-i18n="p3d">按你设定的命令运行检查，失败时不会标记通过。每轮保留提交、补丁、检查结果与协作对话。</p></li>
-        </ol>
-      </div>
-    </section>
-
-    <section class="section method repository-method" id="method" tabindex="-1" aria-labelledby="method-title">
-      <div class="wrap">
-        <div class="section-head"><div><p class="eyebrow" data-i18n="navMethod">流程</p><h2 id="method-title" data-i18n="methodTitle">把任务交给他们，<br>把决定留给你。</h2></div><p class="lead" data-i18n="methodLead">从选择仓库到审阅补丁，整个协作循环在桌面软件中完成。你可以设定轮次上限，也可以随时停止。</p></div>
-        <ol class="steps">
-          <li class="step"><span class="step-number" aria-hidden="true">01</span><h3 data-i18n="s1t">选择现有仓库</h3><p data-i18n="s1d">选择本机上工作区干净、已有提交的 Git 仓库。选好两个 Agent，写下任务与测试命令。</p></li>
-          <li class="step"><span class="step-number" aria-hidden="true">02</span><h3 data-i18n="s2t">轮流修改与审查</h3><p data-i18n="s2d">A 完成初版并运行检查；B 读取差异、审查并讨论，再接手修改；A 继续审查。通过审查和检查，或到达轮次上限时结束。</p></li>
-          <li class="step"><span class="step-number" aria-hidden="true">03</span><h3 data-i18n="s3t">审阅后合并</h3><p data-i18n="s3d">查看每轮差异、检查结果和提交，下载补丁或打开任务 worktree。确认后自行合并任务分支。</p></li>
-        </ol>
-        <p class="method-note" data-i18n="homeAgentNote">需要本机安装 Git，以及已登录的 Kimi Code、Codex 或 Claude Code CLI。Agent 的订阅或 API 用量由对应服务商计费。</p>
-      </div>
-    </section>
-
-    <section class="section download-section" id="download" tabindex="-1" aria-labelledby="download-title">
-      <div class="wrap">
-        <div class="section-head"><div><p class="eyebrow" data-i18n="navDownload">下载</p><h2 id="download-title" data-i18n="dlTitle">下一次修改，<br>让他们一起完成。</h2></div><p class="lead" data-i18n="dlLead">安装包只来自本项目的 GitHub Releases。选择适合你电脑的版本，下载后无需 PeerGrading 登录即可使用；也可以查看源码并自行构建。</p></div>
-        <div class="pricing download-cards" id="downloads" aria-live="polite"><p class="muted" data-i18n="homeDownloadsLoading">正在读取 GitHub Releases 安装包清单…</p></div>
-        <noscript><p class="notice">请启用 JavaScript 以读取安装包清单；也可以直接访问 GitHub Releases。Please enable JavaScript to read the installer manifest, or open GitHub Releases directly.</p></noscript>
-        <div class="download-fallback" id="download-fallback"><a class="text-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceCode">GitHub 源码</a><a class="text-link" href="https://github.com/010419she-commits/peergrading/releases" target="_blank" rel="noopener noreferrer" data-i18n="allReleases">所有版本</a></div>
-        <div class="download-start"><span data-i18n="homeInstall1">下载并安装</span><span aria-hidden="true">→</span><span data-i18n="homeInstall2">配置本地或云端 Agent</span><span aria-hidden="true">→</span><span data-i18n="homeInstall3">开始互相审查</span></div>
-      </div>
-    </section>
-
-    <section class="section contact" id="open-source" tabindex="-1" aria-labelledby="open-source-title">
-      <div class="wrap">
-        <div class="contact-panel">
-          <div><p class="eyebrow" data-i18n="openSourceNav">开源与自托管</p><h2 id="open-source-title" data-i18n-html="openSourceTitle">完全开源，<br>无需 PeerGrading 登录。</h2><p class="lead" data-i18n="openSourceLead">MIT 许可，可审计、修改和自托管。核心功能不需要 PeerGrading 账号、会员或支付；第三方 Agent 仍使用你自己的服务配置。</p><a class="text-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceNav">查看 GitHub 源码</a></div>
-          <div class="open-source-notes">
-            <div><span class="open-source-note-index" aria-hidden="true">01</span><h3 data-i18n="openSource1Title">源码与 MIT 许可证</h3><p data-i18n="openSource1">查看实现、构建方式和许可证，在自己的环境中复现桌面软件。</p><a href="https://github.com/010419she-commits/peergrading#license" target="_blank" rel="noopener noreferrer" data-i18n="mitLicense">MIT 许可证</a></div>
-            <div><span class="open-source-note-index" aria-hidden="true">02</span><h3 data-i18n="openSource2Title">直接下载或自托管</h3><p data-i18n="openSource2">发布资产以 GitHub Releases 为准；没有资产时只提供源码和版本入口，不生成虚假安装包。</p><a href="https://github.com/010419she-commits/peergrading/releases" target="_blank" rel="noopener noreferrer" data-i18n="allReleases">浏览所有版本</a></div>
-            <div><span class="open-source-note-index" aria-hidden="true">03</span><h3 data-i18n="openSource3Title">反馈与参与</h3><p data-i18n="openSource3">通过 GitHub issue 报告问题、讨论改进或参与贡献。</p><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer" data-i18n="issueLink">提交 issue</a></div>
-          </div>
-        </div>
-      </div>
-    </section>
+      <details class="setup-notes"><summary data-i18n="setupTitle">如何接入自己的 Agent？</summary><div><p data-i18n="setupLocal">本地模型：先启动 Ollama 或 LM Studio 并加载模型，桌面软件可自动识别本机兼容服务。</p><p data-i18n="setupRepo">仓库编辑：需要 Git 和已安装、登录的 Kimi Code、Codex 或 Claude Code CLI。</p><p data-i18n="setupCloud">云端 API：使用自己的 OpenAI 兼容服务配置。CLI 登录、订阅和 API 费用由对应供应商管理。</p></div></details>
+    </div></section>
+    <section class="section download-section" id="download" tabindex="-1" aria-labelledby="download-title"><div class="wrap">
+      <div class="section-head"><p class="eyebrow" data-i18n="navDownload">下载</p><h2 id="download-title" data-i18n="dlTitle">把下一件事，交给他们一起做。</h2><p class="lead" data-i18n="dlLead">选择适合你的电脑的安装包。无需 PeerGrading 账号，安装后即可开始。</p></div>
+      <div class="download-cards" id="downloads" aria-live="polite"><p class="muted" data-i18n="homeDownloadsLoading">正在读取 GitHub Releases 安装包清单…</p></div>
+      <noscript><p class="notice">请启用 JavaScript 以读取安装包清单，或直接访问 GitHub Releases。Enable JavaScript to view installers, or visit GitHub Releases.</p></noscript>
+      <div class="download-fallback" id="download-fallback"><a class="text-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceCode">GitHub 源码</a><a class="text-link" href="https://github.com/010419she-commits/peergrading/releases" target="_blank" rel="noopener noreferrer" data-i18n="allReleases">所有版本</a></div>
+      <p class="section-note" data-i18n="downloadNote">安装包与 SHA-256 校验清单来自 GitHub Releases。macOS 签名与公证状态以对应 Release 说明为准。</p>
+    </div></section>
+    <section class="section open-source-section" id="open-source" tabindex="-1" aria-labelledby="open-source-title"><div class="wrap open-source-layout">
+      <div><p class="eyebrow" data-i18n="openSourceEyebrow">开源 · 本地优先</p><h2 id="open-source-title" data-i18n="openSourceTitle">你的工作，留在你的电脑。</h2><p class="lead" data-i18n="openSourceLead">会话、版本与仓库由本机管理。MIT 许可，你可以查看、修改源码，也可以自行构建和自托管。</p><a class="text-link" href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer"><span data-i18n="sourceNav">GitHub 源码</span><span aria-hidden="true">↗</span></a></div>
+      <div class="source-notes"><p data-i18n="openSourceAccount">核心功能无需 PeerGrading 登录、会员或支付。</p><p data-i18n="openSourceBoundary">官网只提供项目展示与安装包下载，不接收仓库任务。</p><p data-i18n="openSourcePrivacy">云模型会按你选择的服务发送相关上下文；请按实际后端评估数据使用与费用。</p></div>
+    </div></section>
   </main>
-
-  <footer class="site-footer"><div class="wrap"><div>© <span id="year">2026</span> PeerGrading <span class="footer-caption" data-i18n="homeFooter">开源、本地优先，一起审查更好的版本。</span></div><nav aria-label="页脚"><a href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceCode">GitHub 源码</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer" data-i18n="issueLink">Issues</a><a href="https://github.com/010419she-commits/peergrading#license" target="_blank" rel="noopener noreferrer" data-i18n="mitLicense">MIT</a></nav></div></footer>
-  <dialog class="menu-dialog" id="mobile-menu" aria-labelledby="mobile-menu-title">
-    <div class="menu-shell"><div class="menu-top"><h2 class="menu-title" id="mobile-menu-title" data-i18n="navTitle">导航</h2><button class="button" id="menu-close" type="button" autofocus data-i18n="closeMenu">关闭菜单</button></div><nav class="dialog-nav" aria-label="移动端主导航"><a href="#hybrid"><small aria-hidden="true">01</small><span data-i18n="hybridNav">本地 × 云端</span></a><a href="#acceleration"><small aria-hidden="true">02</small><span data-i18n="accelerationNav">云端辅助</span></a><a href="#repository"><small aria-hidden="true">03</small><span data-i18n="homeNavRepository">仓库协作</span></a><a href="#open-source"><small aria-hidden="true">04</small><span data-i18n="openSourceNav">开源与自托管</span></a><a href="#download"><small aria-hidden="true">05</small><span data-i18n="navDownload">下载</span></a><a href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer"><small aria-hidden="true">06</small><span data-i18n="sourceNav">GitHub 源码</span></a></nav><p class="menu-caption">PeerGrading</p></div>
-  </dialog>
+  <footer class="site-footer"><div class="wrap"><div>© <span id="year">2026</span> PeerGrading <span class="footer-caption" data-i18n="homeFooter">两个 Agent，一起做好下一版。</span></div><nav aria-label="页脚" data-i18n-aria="footerNav"><a href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceCode">GitHub 源码</a><a href="https://github.com/010419she-commits/peergrading/issues" target="_blank" rel="noopener noreferrer" data-i18n="issueLink">问题反馈</a><a href="https://github.com/010419she-commits/peergrading#license" target="_blank" rel="noopener noreferrer" data-i18n="mitLicense">MIT 许可</a></nav></div></footer>
+  <dialog class="menu-dialog" id="mobile-menu" aria-labelledby="mobile-menu-title"><div class="menu-shell"><div class="menu-top"><h2 id="mobile-menu-title" data-i18n="navTitle">导航</h2><button class="button small" id="menu-close" type="button" autofocus data-i18n="closeMenu">关闭</button></div><nav class="dialog-nav" aria-label="移动端导航" data-i18n-aria="mobileNav"><a href="#workspace" data-i18n="workspaceNav">工作区</a><a href="#hybrid" data-i18n="hybridNav">双 Agent 协作</a><a href="#open-source" data-i18n="openSourceNav">开源</a><a href="#download" data-i18n="navDownload">下载</a><a href="https://github.com/010419she-commits/peergrading" target="_blank" rel="noopener noreferrer" data-i18n="sourceNav">GitHub 源码</a></nav><p class="menu-caption">PeerGrading</p></div></dialog>
   <script src="/site-i18n.js"></script>
   <script src="/download-site.js"></script>
   <script src="/collaboration-demo.js"></script>
