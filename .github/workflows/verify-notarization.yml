@@ -1,0 +1,107 @@
+name: Verify notarization credentials
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    env:
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY_ID_CANDIDATES: ${{ secrets.APPLE_API_KEY_ID_CANDIDATES }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Normalize the existing notarization key
+        shell: bash
+        run: node scripts/macos-signing.mjs notary-key
+      - name: Verify existing credential IDs without submitting software
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { spawnSync } from 'node:child_process';
+          let directory;
+          try {
+            const issuer = (process.env.APPLE_API_ISSUER || '').trim();
+            if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(issuer)) throw new Error();
+            const sources = [process.env.APPLE_API_KEY_ID || '', ...(process.env.APPLE_API_KEY_ID_CANDIDATES || '').split(',')];
+            const seen = new Set();
+            const candidates = [];
+            for (const [sourceIndex, source] of sources.entries()) {
+              const id = source.trim();
+              if (!id || seen.has(id)) continue;
+              if (!/^[A-Z\d]{10}$/.test(id)) throw new Error();
+              seen.add(id);
+              if (candidates.length < 5) candidates.push({ id, sourceIndex });
+            }
+            if (!candidates.length || !process.env.RUNNER_TEMP || !process.env.APPLE_API_KEY) throw new Error();
+            const keyFile = path.resolve(process.env.RUNNER_TEMP, 'PeerGrading-AuthKey.p8');
+            if (path.resolve(process.env.APPLE_API_KEY) !== keyFile || !fs.statSync(keyFile).isFile()) throw new Error();
+            directory = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP, 'peergrading-notary-check-'));
+            let accepted;
+            for (const { id, sourceIndex } of candidates) {
+              const stdout = fs.openSync(path.join(directory, `history-${sourceIndex}.stdout`), 'wx', 0o600);
+              let stderr;
+              let result;
+              try {
+                stderr = fs.openSync(path.join(directory, `history-${sourceIndex}.stderr`), 'wx', 0o600);
+                result = spawnSync('/usr/bin/xcrun', ['notarytool', 'history', '--key', keyFile,
+                  '--key-id', id, '--issuer', issuer, '--output-format', 'json'], {
+                  stdio: ['ignore', stdout, stderr], timeout: 60_000,
+                });
+              } finally {
+                fs.closeSync(stdout);
+                if (stderr !== undefined) fs.closeSync(stderr);
+              }
+              if (!result.error && result.status === 0) {
+                accepted = sourceIndex;
+                break;
+              }
+            }
+            if (accepted === undefined) throw new Error();
+            fs.rmSync(directory, { recursive: true, force: true });
+            directory = undefined;
+            console.log(`Accepted notarization credential source index: ${accepted}`);
+          } catch {
+            console.error('Notarization credential verification failed. Check the existing key, issuer and candidate IDs.');
+            process.exitCode = 1;
+          } finally {
+            if (directory) {
+              try { fs.rmSync(directory, { recursive: true, force: true }); }
+              catch { console.error('Could not clean temporary verification material.'); process.exitCode = 1; }
+            }
+          }
+          NODE
+      - name: Remove temporary credentials and private command output
+        if: always()
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          try {
+            const temporary = process.env.RUNNER_TEMP;
+            if (!temporary) throw new Error();
+            fs.rmSync(path.join(temporary, 'PeerGrading-AuthKey.p8'), { force: true });
+            for (const name of fs.readdirSync(temporary)) {
+              if (/^peergrading-notary-check-[A-Za-z0-9]+$/.test(name)) {
+                fs.rmSync(path.join(temporary, name), { recursive: true, force: true });
+              }
+            }
+          } catch {
+            console.error('Could not clean temporary verification material.');
+            process.exitCode = 1;
+          }
+          NODE

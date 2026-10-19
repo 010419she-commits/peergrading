@@ -43,6 +43,8 @@ PeerGrading 0.6.0 将本地协作与公网下载站点拆成两个运行入口�
 
 macOS 签名和公证不是由文件名推断的：只有构建 Runner 实际具备相应凭证时才能发生。缺少凭证的产物不得宣称已签名或已公证。
 
+公证凭证可通过手动运行 `Verify notarization credentials` 工作流只读检查：工作流规范化现有私钥，再用 `notarytool history` 验证认证，不提交软件或发布产物。可选 Secret `APPLE_API_KEY_ID_CANDIDATES` 接受逗号分隔的已有 Key ID，最多尝试五个不同 ID；这不会创建新密钥。成功仅输出来源索引：默认 ID 为 0，CSV 第一个字段为 1，依此类推；空白和重复字段被跳过但不重排索引。私钥、ID、Issuer、历史与错误原文不输出，临时私钥和命令输出随后删除。
+
 ### macOS 签名与已有版本重建
 
 Release Runner 将 `CSC_LINK`（Base64 编码的 P12）和 `CSC_KEY_PASSWORD` 导入临时钥匙串。P12 密码只用于证书导入；钥匙串创建、解锁和 `set-key-partition-list` 使用另一份随机密码。签名助手验证 Developer ID Application 身份后，通过 `CSC_KEYCHAIN` 交给 Electron Builder。构建进程须 `unset CSC_LINK` 及证书导入密码，避开自动导入路径；仅设置为空字符串仍会被 Electron Builder 当作配置值。构建结束后删除临时钥匙串和公证私钥文件，密码不写入构建日志或产物。
