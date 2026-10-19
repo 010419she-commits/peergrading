@@ -152,7 +152,7 @@ jobs:
           set -euo pipefail
           # electron-builder treats an empty CSC_LINK as a configured value.
           unset CSC_LINK CSC_INSTALLER_LINK CSC_KEY_PASSWORD CSC_INSTALLER_KEY_PASSWORD
-          node -e 'const {PlatformPackager}=require("app-builder-lib/out/platformPackager.js"); const pkg=require("./package.json"); const link=PlatformPackager.prototype.getCscLink.call({info:{config:pkg.build},platformSpecificBuildOptions:pkg.build.mac}); if(link != null) throw new Error("Automatic certificate import must be disabled for the prepared keychain");'
+          node -e 'require("app-builder-lib"); const {PlatformPackager}=require("app-builder-lib/out/platformPackager.js"); const pkg=require("./package.json"); const link=PlatformPackager.prototype.getCscLink.call({info:{config:pkg.build},platformSpecificBuildOptions:pkg.build.mac}); if(link != null) throw new Error("Automatic certificate import must be disabled for the prepared keychain");'
           signing_args=()
           if [ -n "${CSC_KEYCHAIN:-}" ]; then
             signing_args+=(--config.forceCodeSigning=true)

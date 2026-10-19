@@ -3,7 +3,27 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { prepareSigning, cleanupSigning } from "../scripts/macos-signing.mjs";
+
+test("the installed builder requires CSC_LINK to be absent, not an empty value", () => {
+  const require = createRequire(import.meta.url);
+  // Load the package entry first to initialize its circular module graph.
+  require("app-builder-lib");
+  const { PlatformPackager } = require("app-builder-lib/out/platformPackager.js");
+  const pkg = require("../package.json");
+  const resolveLink = () => PlatformPackager.prototype.getCscLink.call({ info: { config: pkg.build }, platformSpecificBuildOptions: pkg.build.mac });
+  const original = process.env.CSC_LINK;
+  try {
+    process.env.CSC_LINK = "";
+    assert.equal(resolveLink(), "");
+    delete process.env.CSC_LINK;
+    assert.equal(resolveLink() == null, true);
+  } finally {
+    if (original === undefined) delete process.env.CSC_LINK;
+    else process.env.CSC_LINK = original;
+  }
+});
 
 function fixture(t: any, failure = "", identity = true) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pg-signing-test-"));
