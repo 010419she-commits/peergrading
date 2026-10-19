@@ -23,6 +23,7 @@ test("public site serves only presentation files and the GitHub Release manifest
   fs.writeFileSync(path.join(temporary, "terms.html"), "terms");
   fs.writeFileSync(path.join(temporary, "site.css"), "body{}");
   fs.writeFileSync(path.join(temporary, "site-theme.js"), "/* presentation theme only */");
+  fs.writeFileSync(path.join(temporary, "favicon.ico"), Buffer.from([0, 0, 1, 0]));
   fs.writeFileSync(path.join(temporary, "installers.json"), JSON.stringify(manifest));
   fs.mkdirSync(path.join(temporary, "downloads"));
   fs.writeFileSync(path.join(temporary, "downloads", "PeerGrading Setup 9.9.9.exe"), "not a release source");
@@ -38,7 +39,7 @@ test("public site serves only presentation files and the GitHub Release manifest
   const home = await fetch(base + "/");
   assert.equal(home.status, 200);
   assert.match(await home.text(), /PeerGrading downloads/);
-  for (const route of ["/privacy", "/terms", "/site.css", "/site-theme.js"]) assert.equal((await fetch(base + route)).status, 200, route);
+  for (const route of ["/privacy", "/terms", "/site.css", "/site-theme.js", "/favicon.ico"]) assert.equal((await fetch(base + route)).status, 200, route);
   const response = await fetch(base + "/installers.json");
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), manifest);

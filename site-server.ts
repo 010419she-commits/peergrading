@@ -18,6 +18,7 @@ const publicFiles = new Map(Object.entries({
   "/collaboration-demo.js": "collaboration-demo.js",
   "/legal.css": "legal.css",
   "/icon.png": "icon.png",
+  "/favicon.ico": "favicon.ico",
 }));
 
 export function createSiteApp(publicDirectory = path.join(config.root, "public")) {

@@ -45,7 +45,7 @@ svg { flex: none; }
 
 /* The rail and titlebar leave the conversation as the visual focus. */
 .titlebar { display: flex; align-items: center; gap: 18px; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--bg); }
-.brand-mini { color: var(--fg); text-decoration: none; flex: none; }
+.brand-mini { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); text-decoration: none; flex: none; }
 .brand-mini .brand-name { font-size: 15px; font-weight: 500; letter-spacing: -.3px; }
 .titlebar .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titlebar .right { display: flex; align-items: center; gap: 16px; margin-left: auto; }
@@ -82,7 +82,7 @@ html[data-theme="dark"] .theme-moon { display: none; }
 #welcome h1, #welcome h2 { margin: 0 0 12px; font-size: clamp(24px, 2.5vw, 30px); line-height: 1.4; letter-spacing: -.6px; font-weight: 500; }
 #welcome p { max-width: 430px; margin: 0 auto; color: var(--muted); font-size: 14px; }
 .welcome-mark { width: 48px; height: 48px; margin: 0 auto 24px; color: var(--fg); font-size: 34px; font-weight: 400; line-height: 48px; letter-spacing: -3px; }
-.welcome-mark span { color: var(--accent); }
+.welcome-mark img { display: block; width: 48px; height: 48px; }
 .welcome-suggestions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
 .welcome-suggestions button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; }
 .welcome-suggestions button:hover { border-color: var(--line-strong); color: var(--fg); background: var(--surface); }

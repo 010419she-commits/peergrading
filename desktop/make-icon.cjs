@@ -1,22 +1,77 @@
-// 用 Electron 离屏渲染生成应用图标：node_modules/.bin/electron desktop/make-icon.cjs
+// Render the shared vector source: npx electron desktop/make-icon.cjs
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
+const path = require("node:path");
+const { ICON_SIZES, encodeIco } = require("./icon-assets.cjs");
+
+const root = path.resolve(__dirname, "..");
+const size = 1024;
+let win;
+const timeout = setTimeout(() => {
+  console.error("Icon rendering timed out");
+  app.exit(1);
+}, 30_000);
+
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1024, height: 1024, transparent: true, frame: false, backgroundColor: "#00000000", webPreferences: { offscreen: true } });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d2632"/><stop offset="1" stop-color="#10141b"/></linearGradient></defs>
-    <rect x="48" y="48" width="928" height="928" rx="210" fill="url(#g)"/>
-    <rect x="48" y="48" width="928" height="928" rx="210" fill="none" stroke="#353f4d" stroke-width="6"/>
-    <circle cx="430" cy="530" r="236" fill="none" stroke="#d6ba81" stroke-width="30"/>
-    <circle cx="594" cy="530" r="236" fill="none" stroke="#f3f0e9" stroke-opacity=".5" stroke-width="30"/>
-    <text x="512" y="615" text-anchor="middle" font-family="'Noto Serif SC','Songti SC','STSong',Georgia,serif" font-weight="500" font-size="320" fill="#d6ba81">P</text>
-  </svg>`;
-  await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(`<html><body style="margin:0;background:transparent">${svg}</body></html>`));
-  await new Promise((r) => setTimeout(r, 800));
-  const img = await win.webContents.capturePage({ x: 0, y: 0, width: 1024, height: 1024 });
-  fs.mkdirSync("build", { recursive: true });
-  fs.writeFileSync("build/icon.png", img.toPNG());
-  fs.writeFileSync("public/icon.png", img.resize({ width: 256 }).toPNG());
-  console.log("icon written", img.getSize());
+  const svg = fs.readFileSync(path.join(root, "build/icon.svg"), "utf8");
+  const source = "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
+  win = new BrowserWindow({
+    show: false,
+    width: size,
+    height: size,
+    useContentSize: true,
+    enableLargerThanScreen: true,
+    transparent: true,
+    frame: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      offscreen: { deviceScaleFactor: 1 },
+      backgroundThrottling: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+    img{display:block;width:100%;height:100%}
+    </style></head><body><img id="icon" src="${source}"></body></html>`;
+  await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  // Wait for decoding and frame submission, independent of machine speed.
+  await win.webContents.executeJavaScript(`(async () => {
+    await document.getElementById("icon").decode();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  })()`);
+  const image = await win.webContents.capturePage(
+    { x: 0, y: 0, width: size, height: size },
+    { stayHidden: true },
+  );
+  const actual = image.getSize();
+  if (actual.width !== size || actual.height !== size) {
+    throw new Error(`Unexpected icon size: ${actual.width}x${actual.height}`);
+  }
+  const pixels = image.toBitmap();
+  const centerAlpha = pixels[(Math.floor(size / 2) * size + Math.floor(size / 2)) * 4 + 3];
+  if (pixels[3] !== 0 || centerAlpha !== 255) {
+    throw new Error("Icon render must preserve transparent corners and an opaque center");
+  }
+  const icons = ICON_SIZES.map((width) => ({
+    size: width,
+    png: image.resize({ width, height: width, quality: "best" }).toPNG(),
+  }));
+  const ico = encodeIco(icons);
+  fs.mkdirSync(path.join(root, "build"), { recursive: true });
+  fs.mkdirSync(path.join(root, "public"), { recursive: true });
+  fs.writeFileSync(path.join(root, "build/icon.png"), image.toPNG());
+  fs.writeFileSync(path.join(root, "public/icon.png"), icons.at(-1).png);
+  fs.writeFileSync(path.join(root, "build/icon.ico"), ico);
+  fs.writeFileSync(path.join(root, "public/favicon.ico"), ico);
+  console.log("Generated build/icon.png (1024), public/icon.png (256), and ICOs (" + ICON_SIZES.join(", ") + ")");
+  clearTimeout(timeout);
+  win.destroy();
   app.quit();
+}).catch((error) => {
+  clearTimeout(timeout);
+  console.error(error);
+  if (win && !win.isDestroyed()) win.destroy();
+  app.exit(1);
 });

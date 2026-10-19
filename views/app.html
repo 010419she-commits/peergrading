@@ -4,6 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex">
 <title>PeerGrading</title>
 <script src="/theme.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico?v=0.6.7">
 <link rel="stylesheet" href="/style.css">
 <script src="/app-vendor.js"></script>
 <script src="/i18n.js"></script>
@@ -11,7 +12,7 @@
 <body>
 <div class="window">
   <header class="titlebar">
-    <span class="brand-mini"><span class="brand-name" data-i18n="appTitle"></span></span>
+    <span class="brand-mini"><img class="brand-symbol" src="/icon.png?v=0.6.7" width="22" height="22" alt=""><span class="brand-name" data-i18n="appTitle"></span></span>
     <div class="right"><span class="local-first-badge" data-i18n="localRunning"></span></div>
   </header>
   <div class="content">
@@ -27,7 +28,7 @@
     <main class="main">
       <header class="chat-heading"><h1 id="conversation-title" data-i18n="newConversation"></h1><button class="btn sm" id="show-artifacts" type="button" aria-controls="artifacts-drawer" aria-expanded="false"><svg class="" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M8 12h8M8 16h5"/></svg><span data-i18n="artifacts"></span><span id="artifact-count" hidden></span></button></header>
       <div class="chat-scroll" id="chat-scroll">
-        <section class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true">P<span>·</span></div><h2 data-i18n="welcomeTitle"></h2><p data-i18n="welcomeHint"></p></section>
+        <section class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true"><img src="/icon.png?v=0.6.7" width="48" height="48" alt=""></div><h2 data-i18n="welcomeTitle"></h2><p data-i18n="welcomeHint"></p></section>
         <div id="timeline" role="log" aria-live="polite" aria-relevant="additions" data-i18n-aria="conversation"></div>
         <details class="assist-details" id="assist-details" hidden><summary data-i18n="accelerationTitle"></summary>
       <section class="assist-status" id="assist-status" aria-live="polite" hidden>

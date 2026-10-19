@@ -1,6 +1,6 @@
 {
   "name": "peergrading",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "license": "MIT",
   "author": "PeerGrading contributors",
@@ -11,6 +11,7 @@
   "type": "module",
   "description": "PeerGrading · 本地与云端 AI 智能体互相审查、讨论、修改的开源协作循环",
   "scripts": {
+    "icons": "electron desktop/make-icon.cjs",
     "start": "node --no-warnings=ExperimentalWarning --env-file-if-exists=.env site-server.ts",
     "dev": "npm run bundle && node --no-warnings=ExperimentalWarning --env-file-if-exists=.env scripts/dev.mjs",
     "bundle": "npm run bundle:vendor && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs && esbuild site-server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/site-server.mjs",
@@ -74,11 +75,14 @@
       "notarize": true
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

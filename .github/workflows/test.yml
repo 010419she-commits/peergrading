@@ -31,6 +31,11 @@ jobs:
           test -f dist/server.mjs
           test -f dist/site-server.mjs
           test -f public/app-vendor.js
+          test -f build/icon.svg
+          test -f build/icon.png
+          test -f build/icon.ico
+          test -f public/icon.png
+          test -f public/favicon.ico
           node --check public/theme.js
           node --check public/site-theme.js
       - name: Open-source safety check (when provided)

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>PeerGrading</title>
+  <desc>A geometric P in two complementary forms on a rounded charcoal tile.</desc>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="#232B28"/>
+  <rect x="272" y="280" width="104" height="464" rx="32" fill="#F3F3EB"/>
+  <path d="M438 280H548C662 280 752 348 752 440C752 532 662 600 548 600H438V496H544C604 496 648 474 648 440C648 406 604 384 544 384H438V280Z" fill="#F3F3EB"/>
+</svg>

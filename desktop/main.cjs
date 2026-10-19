@@ -5,6 +5,7 @@ const net = require("node:net");
 const { execFileSync, execFile } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { createThemePreferences, registerThemeIpc } = require("./theme.cjs");
+if (process.platform === "win32") app.setAppUserModelId("ai.peergrading.desktop");
 
 // 同一时间只跑一份：第二次双击图标时把已开的窗口提到前面，而不是再起一个服务
 const gotLock = app.requestSingleInstanceLock();
@@ -85,6 +86,7 @@ async function start() {
   nativeTheme.themeSource = preferences.getTheme();
 
   win = new BrowserWindow({
+    icon: path.join(__dirname, "..", "public", process.platform === "win32" ? "favicon.ico" : "icon.png"),
     width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: themeColor(preferences.getTheme()), title: "PeerGrading",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.cjs") },
