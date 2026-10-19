@@ -1,9 +1,10 @@
 // desktop/main.cjs — Electron 外壳：在本机启动服务（桌面模式），窗口里打开工作台
-const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, shell, Menu, dialog, ipcMain, nativeTheme } = require("electron");
 const path = require("node:path");
 const net = require("node:net");
 const { execFileSync, execFile } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
+const { createThemePreferences, registerThemeIpc } = require("./theme.cjs");
 
 // 同一时间只跑一份：第二次双击图标时把已开的窗口提到前面，而不是再起一个服务
 const gotLock = app.requestSingleInstanceLock();
@@ -79,9 +80,12 @@ async function start() {
   await import(pathToFileURL(path.join(__dirname, "..", "dist", "server.mjs")).href);
   const base = `http://127.0.0.1:${process.env.PORT}`;
   await waitFor(`${base}/api/bootstrap`);
+  const preferences = createThemePreferences(userData, () => nativeTheme.shouldUseDarkColors);
+  const themeColor = (theme) => theme === "dark" ? "#1c1e20" : "#f8f7f4";
+  nativeTheme.themeSource = preferences.getTheme();
 
   win = new BrowserWindow({
-    width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: "#10141b", title: "PeerGrading",
+    width: 1440, height: 920, minWidth: 980, minHeight: 640, backgroundColor: themeColor(preferences.getTheme()), title: "PeerGrading",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, "preload.cjs") },
   });
@@ -107,6 +111,10 @@ async function start() {
   const trusted = (event) => {
     if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw new Error("Invalid window");
   };
+  registerThemeIpc(ipcMain, trusted, preferences, (saved) => {
+    nativeTheme.themeSource = saved;
+    win.setBackgroundColor(themeColor(saved));
+  });
   guardWindow(win);
   win.on("closed", () => { win = null; });
   ipcMain.removeHandler("peergrading:open-external");

@@ -31,6 +31,74 @@ let runId = null, controller = null;
 const msgs = new Map();
 const versions = [];
 let repositoryRun = false, repositoryManifest = null, diffRequest = 0, replayStatus = null;
+let isRunning = false, activeTask = "", displayedRound = 0, viewEpoch = 0;
+let activeDrawer = null, drawerOpener = null;
+
+/* ---------- 极简聊天工作区 ---------- */
+function updateThemeButton() {
+  const dark = window.PeerGradingTheme.current() === "dark", button = $("#theme-toggle");
+  button.setAttribute("aria-pressed", String(dark));
+  button.setAttribute("aria-label", t(dark ? "switchToDay" : "switchToNight"));
+  button.title = t(dark ? "switchToDay" : "switchToNight");
+}
+$("#theme-toggle").onclick = () => { window.PeerGradingTheme.toggle(); updateThemeButton(); };
+function drawerTriggers(id) { return [...document.querySelectorAll(`[aria-controls="${id}"]`)]; }
+function closeDrawer(restore = true) {
+  if (!activeDrawer) return;
+  const id = activeDrawer.id;
+  activeDrawer.hidden = true; activeDrawer = null;
+  $("#drawer-backdrop").hidden = true;
+  $(".main").inert = false; $(".nav-rail").inert = false;
+  drawerTriggers(id).forEach((button) => button.setAttribute("aria-expanded", "false"));
+  if (restore && drawerOpener?.isConnected) drawerOpener.focus();
+}
+function openDrawer(id, opener = document.activeElement) {
+  if (activeDrawer?.id === id) { closeDrawer(); return; }
+  closeDrawer(false);
+  drawerOpener = opener; activeDrawer = $("#" + id); activeDrawer.hidden = false;
+  $("#drawer-backdrop").hidden = false;
+  $(".main").inert = true; $(".nav-rail").inert = true;
+  drawerTriggers(id).forEach((button) => button.setAttribute("aria-expanded", "true"));
+  activeDrawer.querySelector("[data-close-drawer]").focus();
+}
+for (const [trigger, drawer] of [["open-settings", "settings-drawer"], ["open-history", "session-drawer"], ["open-artifacts", "artifacts-drawer"], ["show-artifacts", "artifacts-drawer"]]) {
+  $("#" + trigger).onclick = (event) => openDrawer(drawer, event.currentTarget);
+}
+document.querySelectorAll("[data-close-drawer]").forEach((button) => { button.onclick = () => closeDrawer(); });
+$("#drawer-backdrop").onclick = () => closeDrawer();
+document.addEventListener("keydown", (event) => {
+  const sheetOpen = $("#sheet").classList.contains("open");
+  if (event.key === "Escape") { if (sheetOpen) closeSheet(); else closeDrawer(); return; }
+  const dialog = sheetOpen ? $("#sheet .sheet") : activeDrawer;
+  if (event.key !== "Tab" || !dialog) return;
+  const focusable = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]')].filter((el) => !el.closest("[hidden]") && el.getClientRects().length);
+  if (!focusable.length) { event.preventDefault(); dialog.focus(); return; }
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+});
+function updateConversationHeading() {
+  const title = $("#conversation-title");
+  title.textContent = activeTask ? activeTask.split("\n")[0] : t("newConversation");
+  title.title = activeTask;
+  $("#welcome").hidden = Boolean(activeTask || $("#timeline").childElementCount);
+  $("#artifact-count").hidden = !versions.length;
+  $("#artifact-count").textContent = versions.length || "";
+}
+function addUserTask(task) {
+  activeTask = task; displayedRound = 0;
+  const message = document.createElement("div"); message.className = "msg user";
+  message.innerHTML = '<div class="avatar" aria-hidden="true"></div><div class="bubble"><div class="meta"><b></b></div><div class="body user-task"></div></div>';
+  message.querySelector("b").textContent = t("you"); message.querySelector(".body").textContent = task;
+  $("#timeline").append(message); updateConversationHeading();
+}
+function resizeTask() { const input = $("#task"); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; }
+$("#task").addEventListener("input", resizeTask);
+$("#task").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!isRunning && !$("#start").disabled) start(); }
+});
+$("#new-task").onclick = () => { if (isRunning) return; resetView(); closeDrawer(false); $("#task").value = ""; $("#status").textContent = ""; resizeTask(); $("#task").focus(); };
+$("#repository-chip").onclick = (event) => openDrawer("settings-drawer", event.currentTarget);
 
 marked.setOptions({ breaks: true });
 /** 协作中生成的图片 / 视频以 media://文件名 引用，渲染时指向当前会话的媒体接口。在渲染器层做映射，代码块 / 行内代码里的引用原样保留 */
@@ -61,9 +129,19 @@ function applyI18n() {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => (el.placeholder = t(el.dataset.i18nPh)));
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => { el.title = t(el.dataset.i18nTitle); });
   document.querySelectorAll("#lang-seg button").forEach((b) => b.classList.toggle("active", b.dataset.lang === lang));
   $("#history").options[0] && ($("#history").options[0].textContent = t("historyPh"));
-  if (!msgs.size) $("#timeline").innerHTML = `<p class="sys">${esc(t("timelineEmpty"))}</p>`;
+  updateConversationHeading(); updateThemeButton();
+  document.querySelectorAll(".msg.user .meta b").forEach((el) => { el.textContent = t("you"); });
+  document.querySelectorAll(".round-divider").forEach((el) => { el.textContent = t("round")(Number(el.dataset.round)); });
+  document.querySelectorAll(".artifact-card").forEach((card) => {
+    card.querySelector("strong").textContent = t("artifactVersion")(Number(card.dataset.version));
+    card.querySelector("small").textContent = `${card.dataset.author} · ${t("versionSaved")}`;
+    card.querySelector(".artifact-actions").textContent = t("viewArtifact") + " →";
+  });
+  [...$("#tabs").children].forEach((button, index) => { const version = versions[index]; if (version) button.textContent = t("vTab")(version.n, version.name); });
   if (!versions.length) $("#version-body").innerHTML = `<p class="sys">${esc(t("versionsEmpty"))}</p>`;
   renderSlot("A"); renderSlot("B"); renderCards(); renderRepository(); renderLocalModels(); renderApiModels(); renderAssistPhase(); renderAssistMetrics();
 }
@@ -108,11 +186,18 @@ function renderSlot(k) {
     ? `<div class="ic">${esc(a.icon)}</div><div class="txt"><div class="t">${esc(tx(a.title))} ${a.auto ? `<span class="badge auto">${t("autoBadge")}</span>` : `<span class="badge manual">${t("manualBadge")}</span>`}</div><div class="m"><span class="dot ${a.status}"></span>${esc(statusLabel(a))} · ${esc(tx(a.subtitle))}</div>${a.model ? `<div class="agent-model">${esc(t("modelLabel"))}: ${esc(tx(a.model))}</div>` : ""}</div><span class="chg">${esc(t("change"))}</span>`
     : `<div class="ic">?</div><div class="txt"><div class="t">${esc(t("choose"))}</div></div>`;
   el.onclick = () => openSheet(k);
+  el.setAttribute("aria-disabled", String(isRunning));
+  const quick = $("#quick-pick-" + k);
+  quick.innerHTML = `<span class="agent-dot ${k}" aria-hidden="true"></span><span>${esc(a ? tx(a.title) : t(k === "A" ? "chooseAuthor" : "chooseReviewer"))}</span><span class="chip-chevron" aria-hidden="true">⌄</span>`;
+  quick.setAttribute("aria-label", `${t(k === "A" ? "chooseAuthor" : "chooseReviewer")}${a ? ": " + tx(a.title) : ""}`);
+  quick.title = a ? `${tx(a.title)} · ${statusLabel(a)}` : t("choose");
+  quick.disabled = isRunning;
+  quick.onclick = () => openSheet(k);
   $("#effort-row-" + k).hidden = !(a && a.runner?.type === "anthropic");
   $("#app-row-" + k).hidden = !(a && a.kind === "relay");
 }
-function openSheet(k) { pickingSlot = k; $("#sheet").classList.add("open"); renderCards(); loadLocalModels(); loadApiModels(); }
-function closeSheet() { $("#sheet").classList.remove("open"); pickingSlot = null; $("#api-model-key").value = ""; }
+function openSheet(k) { if (isRunning) return; closeDrawer(false); pickingSlot = k; $("#sheet").classList.add("open"); $(".main").inert = true; $(".nav-rail").inert = true; renderCards(); loadLocalModels(); loadApiModels(); $("#close-sheet").focus(); }
+function closeSheet() { const slot = pickingSlot; $("#sheet").classList.remove("open"); pickingSlot = null; $("#api-model-key").value = ""; $(".main").inert = false; $(".nav-rail").inert = false; if (slot) $("#quick-pick-" + slot).focus(); }
 $("#close-sheet").onclick = closeSheet;
 $("#sheet").onclick = (e) => { if (e.target === $("#sheet")) closeSheet(); };
 $("#refresh").onclick = () => { loadAgents(true).catch(() => {}); loadLocalModels(); loadApiModels(); };
@@ -128,6 +213,8 @@ function renderCards() {
     if (group !== lastGroup) { lastGroup = group; const h = document.createElement("div"); h.className = "group"; h.textContent = t(group === "auto" ? "groupAuto" : "groupManual"); box.appendChild(h); }
     const card = document.createElement("div");
     card.className = "card" + (pickingSlot && chosen[pickingSlot]?.id === a.id ? " selected" : "");
+    card.tabIndex = 0; card.setAttribute("role", "button"); card.setAttribute("aria-label", tx(a.title));
+    card.onkeydown = (event) => { if (event.target === card && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); card.click(); } };
     let detail = a.statusDetail ? `<div class="d">${esc(tx(a.statusDetail))}</div>` : "";
     if (a.hintCommand) detail += `<div class="d">${esc(t("loginHint"))} <kbd>${esc(tx(a.hintCommand))}</kbd></div>`;
     let side = "";
@@ -403,6 +490,8 @@ function repositoryError(code) {
 }
 function updateRepositoryMode() {
   $("#repository-config").hidden = !isRepositoryMode();
+  $("#repository-chip").hidden = !isRepositoryMode();
+  $("#repository-chip").textContent = $("#repository-path").value.split(/[\\/]/).filter(Boolean).at(-1) || t("modeRepository");
   $("#media-images").closest(".media-opts").hidden = isRepositoryMode();
   document.querySelector('[data-i18n="mediaTitle"]').hidden = isRepositoryMode();
   if (isRepositoryMode()) {
@@ -428,7 +517,14 @@ $("#repository-browse").onclick = async () => {
 };
 async function refreshRepositoryResult() {
   if (!repositoryRun || !currentSessionId) return;
-  try { const r = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/repository`); if (r.ok) { repositoryManifest = (await r.json()).repository; renderRepository(); } } catch {}
+  const epoch = viewEpoch, sessionId = currentSessionId;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/repository`);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (epoch !== viewEpoch || sessionId !== currentSessionId || !repositoryRun) return;
+    repositoryManifest = data.repository; renderRepository();
+  } catch {}
 }
 function renderRepository() {
   const box = $("#repository-result"); if (!box) return;
@@ -484,6 +580,7 @@ function resetAssist() {
   assistPhase = "update";
   for (const key of ASSIST_METRICS) delete assistMetrics[key];
   $("#assist-status").hidden = true; $("#assist-stats").hidden = true;
+  $("#assist-details").hidden = true;
   renderAssistPhase();
 }
 function handleAssist(ev) {
@@ -492,6 +589,7 @@ function handleAssist(ev) {
   const requestedPhase = aliases[ev.phase] || ev.phase;
   assistPhase = typeof requestedPhase === "string" && Object.hasOwn(phases, requestedPhase) ? requestedPhase : "update";
   $("#assist-status").hidden = false; renderAssistPhase();
+  $("#assist-details").hidden = false;
   const result = ev.result?.acceleration ?? ev.result ?? ev.acceleration ?? ev;
   if (result && typeof result === "object") {
     for (const key of ASSIST_METRICS) if (Number.isFinite(result[key]) && result[key] >= 0) assistMetrics[key] = result[key];
@@ -499,14 +597,23 @@ function handleAssist(ev) {
   renderAssistMetrics(); scrollBottom();
 }
 function resetView() {
+  ++viewEpoch;
+  for (const message of msgs.values()) { clearInterval(message.timer); if (message.raf) cancelAnimationFrame(message.raf); }
   $("#timeline").innerHTML = ""; $("#tabs").innerHTML = ""; $("#version-body").innerHTML = ""; $("#final").textContent = "";
   msgs.clear(); versions.length = 0; currentVersion = 0; currentSessionId = null;
   repositoryManifest = null; repositoryRun = false; replayStatus = null; ++diffRequest; $("#repository-result").hidden = true; $("#repository-diff").textContent = "";
   if ($("#finalizer")) { $("#finalizer").hidden = true; $("#fin-log").innerHTML = ""; $("#fin-result").innerHTML = ""; }
   resetAssist();
+  $("#status").textContent = "";
+  activeTask = ""; displayedRound = 0; updateConversationHeading();
 }
-function setRunning(on) { $("#start").disabled = on; $("#stop").disabled = !on; for (const id of ["work-mode", "repository-path", "repository-tests", "repository-browse", "repository-inspect", "history", "acceleration-speculative-review", "acceleration-cache"]) $("#" + id).disabled = on; renderFinalizer(); }
-function scrollBottom() { const main = $(".main"); main.scrollTop = main.scrollHeight; }
+function setRunning(on) {
+  isRunning = on; $("#start").disabled = on; $("#start").hidden = on; $("#stop").disabled = !on; $("#stop").hidden = !on;
+  for (const id of ["task", "new-task", "work-mode", "repository-path", "repository-tests", "repository-browse", "repository-inspect", "history", "acceleration-speculative-review", "acceleration-cache", "quick-pick-A", "quick-pick-B", "rounds", "turns", "name-A", "name-B", "persona-A", "persona-B", "effort-A", "effort-B"]) $("#" + id).disabled = on;
+  document.querySelectorAll(".session-item").forEach((button) => { button.disabled = on; });
+  renderFinalizer();
+}
+function scrollBottom() { const main = $("#chat-scroll"); main.scrollTop = main.scrollHeight; }
 
 function handle(ev) {
   const tl = $("#timeline");
@@ -526,8 +633,9 @@ function handle(ev) {
       const p = document.createElement("p"); p.className = "sys"; p.textContent = ev.text; tl.appendChild(p); $("#status").textContent = ev.text; scrollBottom(); break;
     }
     case "message_start": {
+      if (ev.round && ev.round !== displayedRound) { displayedRound = ev.round; const divider = document.createElement("div"); divider.className = "round-divider"; divider.dataset.round = ev.round; divider.textContent = t("round")(ev.round); tl.append(divider); }
       const el = document.createElement("div"); el.className = "msg " + ev.agent;
-      el.innerHTML = `<div class="avatar">${ev.agent}</div><div class="bubble"><div class="meta"><b>${esc(ev.name)}</b><span class="tag">${esc(t("round")(ev.round))} · ${esc(t("kinds")[ev.kind] || ev.kind)}</span><span class="tag">${esc(ev.source || ev.model)}</span><span class="verdict"></span></div><div class="body cursor"></div><div class="usage"></div></div>`;
+      el.innerHTML = `<div class="avatar" aria-hidden="true"></div><div class="bubble"><div class="meta"><b>${esc(ev.name)}</b><span class="tag">${esc(t("kinds")[ev.kind] || ev.kind)}</span><span class="message-source">${esc(ev.source || ev.model)}</span><span class="verdict"></span></div><div class="body cursor"></div><div class="usage"></div></div>`;
       tl.appendChild(el);
       const prog = document.createElement("div"); prog.className = "prog"; el.querySelector(".bubble").insertBefore(prog, el.querySelector(".body"));
       const m = { el, body: el.querySelector(".body"), text: "", raf: 0, started: Date.now(), prog, phase: "waiting", chars: 0, timer: 0 };
@@ -578,6 +686,11 @@ function handle(ev) {
       versions.push(ev);
       const b = document.createElement("button"); b.className = "btn sm"; b.textContent = t("vTab")(ev.n, ev.name);
       b.onclick = () => showVersion(ev.n); $("#tabs").appendChild(b); showVersion(ev.n);
+      const card = document.createElement("button"); card.type = "button"; card.className = "artifact-card";
+      card.dataset.version = ev.n; card.dataset.author = ev.name;
+      card.innerHTML = `<span class="artifact-icon" aria-hidden="true">↗</span><span class="artifact-info"><strong>${esc(t("artifactVersion")(ev.n))}</strong><small>${esc(ev.name)} · ${esc(t("versionSaved"))}</small></span><span class="artifact-actions">${esc(t("viewArtifact"))} →</span>`;
+      card.onclick = () => { showVersion(ev.n); openDrawer("artifacts-drawer", card); };
+      tl.append(card); updateConversationHeading(); scrollBottom();
       break;
     }
     case "relay_wait": {
@@ -634,7 +747,8 @@ function handle(ev) {
     case "done": {
       const acceleration = ev.acceleration ?? ev.assist;
       if (acceleration) handleAssist({ phase: "result", result: acceleration });
-      $("#final").textContent = (ev.approved === true ? "✓ " : "• ") + ev.reason; showVersion(ev.finalVersion); setTimeout(renderFinalizer, 300); break;
+      $("#final").textContent = (ev.approved === true ? "✓ " : "• ") + ev.reason; $("#status").textContent = ev.reason; showVersion(ev.finalVersion);
+      const outcome = document.createElement("p"); outcome.className = "sys outcome"; outcome.textContent = $("#final").textContent; tl.append(outcome); scrollBottom(); setTimeout(renderFinalizer, 300); break;
     }
     case "error": {
       for (const m of msgs.values()) { m.body.classList.remove("cursor"); if (m.timer) { clearInterval(m.timer); m.timer = 0; } }
@@ -762,6 +876,7 @@ $("#fin-run") && ($("#fin-run").onclick = runFinalizer);
 $("#fin-stop") && ($("#fin-stop").onclick = async () => { if (finRunId) await fetch("/api/finalize/stop/" + finRunId, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); finController?.abort(); });
 
 async function start() {
+  if (isRunning) return;
   const task = $("#task").value;
   if (!task.trim()) { $("#status").textContent = t("needTask"); return; }
   if (!chosen.A || !chosen.B) { $("#status").textContent = t("needAgents"); return; }
@@ -771,7 +886,8 @@ async function start() {
   const body = { mode: $("#work-mode").value, repository: isRepositoryMode() ? { path: $("#repository-path").value.trim(), testCommands: $("#repository-tests").value } : undefined, task, lang, agentA: slot("A"), agentB: slot("B"), maxRounds: $("#rounds").value, discussionTurns: $("#turns").value,
     acceleration: { speculativeReview: $("#acceleration-speculative-review").checked, cache: $("#acceleration-cache").checked },
     media: { images: !isRepositoryMode() && $("#media-images").checked, videos: !isRepositoryMode() && $("#media-videos").checked } };
-  resetView(); repositoryRun = body.mode === "repository"; setRunning(true);
+  closeDrawer(false); resetView(); addUserTask(task); repositoryRun = body.mode === "repository"; setRunning(true);
+  $("#task").value = ""; resizeTask();
   controller = new AbortController();
   try {
     const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
@@ -797,21 +913,43 @@ async function start() {
     setRunning(false); runId = null; loadHistory(); refreshRepositoryResult();
   }
 }
-async function stop() { if (runId) await fetch("/api/stop/" + runId, { method: "POST" }); controller?.abort(); handle({ type: "status", text: t("stopped") }); }
+async function stop() {
+  const stoppingId = runId, stoppingController = controller;
+  $("#stop").disabled = true;
+  try { if (stoppingId) await fetch("/api/stop/" + encodeURIComponent(stoppingId), { method: "POST" }); }
+  catch { /* The local stream must still close if the service disconnected. */ }
+  finally {
+    stoppingController?.abort();
+    if (controller === stoppingController) handle({ type: "status", text: t("stopped") });
+  }
+}
 
 async function loadHistory() {
-  const list = await (await fetch("/api/sessions")).json();
+  let list;
+  try { const response = await fetch("/api/sessions"); if (!response.ok) throw new Error("history_failed"); list = await response.json(); if (!Array.isArray(list)) throw new Error("history_failed"); }
+  catch { $("#session-list").textContent = t("historyFailed"); return; }
   $("#history").innerHTML = `<option value="">${esc(t("historyPh"))}</option>` + list.map((s) => `<option>${esc(s)}</option>`).join("");
+  const container = $("#session-list"); container.replaceChildren();
+  if (!list.length) { container.textContent = t("historyEmpty"); return; }
+  for (const id of list) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "session-item"; button.textContent = id; button.disabled = isRunning;
+    button.onclick = () => { if (isRunning) return; closeDrawer(false); replay(id).catch(() => { $("#status").textContent = t("historyFailed"); }); };
+    container.append(button);
+  }
 }
 async function replay(id) {
-  if (!id) return;
-  const s = await (await fetch("/api/sessions/" + id)).json();
+  if (!id || isRunning) return;
+  const epoch = ++viewEpoch;
+  const response = await fetch("/api/sessions/" + encodeURIComponent(id)); if (!response.ok) throw new Error("history_failed");
+  const s = await response.json();
+  if (epoch !== viewEpoch || isRunning) return;
   resetView(); currentSessionId = id; repositoryRun = !!s.config.repository;
+  addUserTask(s.config.task);
   replayStatus = s.status || null;
   $("#work-mode").value = repositoryRun ? "repository" : "text";
   if (repositoryRun) { $("#repository-path").value = s.config.repository.path; $("#repository-tests").value = (s.config.repository.checks || []).map((c) => c.argv.map((a) => "'" + a.replace(/'/g, "'\\''") + "'").join(" ")).join("\n"); }
   updateRepositoryMode();
-  $("#task").value = s.config.task;
+  $("#task").value = ""; resizeTask();
   $("#acceleration-speculative-review").checked = s.config.acceleration?.speculativeReview ?? true;
   $("#acceleration-cache").checked = s.config.acceleration?.cache ?? true;
   for (const ev of s.events) handle(ev);

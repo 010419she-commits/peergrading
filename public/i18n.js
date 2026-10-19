@@ -1,6 +1,12 @@
 // i18n.js — 中 / 英 界面文案
 window.I18N = {
   zh: {
+    workspaceNav: "工作区导航", workspaceSettings: "协作设置", newTask: "新建任务", newConversation: "新的协作", artifacts: "成果", close: "关闭", language: "界面语言",
+    localRunning: "本地运行", localShort: "本地", switchToDay: "切换到日间模式", switchToNight: "切换到夜间模式",
+    welcomeTitle: "从一个想法开始", welcomeHint: "两位智能体，轮流创作与审查。", conversation: "协作对话", you: "你",
+    chatTaskPh: "描述任务，交给两位 Agent 协作…", composerShortcut: "Enter 发送 · Shift + Enter 换行", chooseAuthor: "选择作者", chooseReviewer: "选择审查者",
+    artifactVersion: (n) => `成果 · 第 ${n} 版`, versionSaved: "版本已保存", viewArtifact: "查看成果", historyEmpty: "还没有会话。从一个新任务开始吧。", historyFailed: "会话读取失败，请重试。",
+
     apiModelsTitle: "云端 API · Kimi / DeepSeek / 通义千问 / 智谱 / 豆包",
     apiModelsAdd: "接入云端 API", apiModelsHint: "选择服务商，填写 API Key 和模型 ID。密钥只保存在本机；协作时由本机直接请求服务商。用于「生成文字 / 代码成果」，仓库文件操作请选 CLI。",
     apiModelsEmpty: "还没有保存云端 API。选择 Kimi 等预设即可填写。", apiModelProvider: "服务商", apiModelName: "连接名称",
@@ -93,6 +99,12 @@ window.I18N = {
     lang: "English",
   },
   en: {
+    workspaceNav: "Workspace navigation", workspaceSettings: "Collaboration settings", newTask: "New task", newConversation: "New conversation", artifacts: "Artifacts", close: "Close", language: "Language",
+    localRunning: "Running locally", localShort: "Local", switchToDay: "Switch to day mode", switchToNight: "Switch to night mode",
+    welcomeTitle: "Start with an idea", welcomeHint: "Two agents, taking turns creating and reviewing.", conversation: "Collaboration conversation", you: "You",
+    chatTaskPh: "Describe a task for two agents to work on…", composerShortcut: "Enter to send · Shift + Enter for a new line", chooseAuthor: "Choose author", chooseReviewer: "Choose reviewer",
+    artifactVersion: (n) => `Artifact · Version ${n}`, versionSaved: "Version saved", viewArtifact: "View artifact", historyEmpty: "No conversations yet. Start a new task.", historyFailed: "Could not load conversations. Please try again.",
+
     apiModelsTitle: "Cloud APIs · Kimi / DeepSeek / Qwen / GLM / Doubao",
     apiModelsAdd: "Connect a cloud API", apiModelsHint: "Choose a provider and enter its API key and model ID. Keys stay on this computer; collaboration requests go directly to the provider. Use text/code deliverables; repository file operations require a CLI.",
     apiModelsEmpty: "No cloud API saved. Choose a preset such as Kimi to get started.", apiModelProvider: "Provider", apiModelName: "Connection name",
