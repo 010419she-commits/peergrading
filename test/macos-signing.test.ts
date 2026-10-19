@@ -4,7 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { prepareSigning, cleanupSigning } from "../scripts/macos-signing.mjs";
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { prepareSigning, cleanupSigning, normalizeNotaryKey, prepareNotaryKey } from "../scripts/macos-signing.mjs";
 
 test("the installed builder requires CSC_LINK to be absent, not an empty value", () => {
   const require = createRequire(import.meta.url);
@@ -122,4 +125,82 @@ test("cleanup rejects a keychain outside its generated temporary directory", t =
   const f = fixture(t);
   assert.throws(() => cleanupSigning({ env: { ...f.env, CSC_KEYCHAIN: path.join(f.cwd, "login.keychain-db") }, spawnSync: f.options.spawnSync }), /unmanaged keychain/);
   assert.deepEqual(f.calls, []);
+});
+
+const notaryKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey;
+const notaryPem = notaryKey.export({ type: "pkcs8", format: "pem" }).toString();
+const notaryPublic = createPublicKey(notaryKey).export({ type: "spki", format: "der" });
+
+test("notarization key normalization preserves the key across supported text and DER encodings", () => {
+  const variants = [
+    notaryPem,
+    "\uFEFF" + notaryPem.replace(/\n/g, "\r\n"),
+    JSON.stringify(notaryPem),
+    notaryPem.replace(/\n/g, "\\n"),
+    notaryPem.replace(/\n/g, "\\r\\n"),
+    "```pem\n" + notaryPem + "```",
+    "'" + notaryPem + "'",
+    Buffer.from(notaryPem).toString("base64"),
+    notaryKey.export({ type: "pkcs8", format: "der" }).toString("base64"),
+    notaryKey.export({ type: "sec1", format: "pem" }).toString(),
+    JSON.stringify(Buffer.from(notaryPem).toString("base64")),
+  ];
+  for (const [index, input] of variants.entries()) {
+    const result = normalizeNotaryKey(input);
+    assert.deepEqual(createPublicKey(result).export({ type: "spki", format: "der" }), notaryPublic, `variant ${index}`);
+    assert.ok(result.startsWith(["-----BEGIN", "PRIVATE KEY-----"].join(" ")));
+    assert.equal(result.includes("\r"), false);
+  }
+});
+
+test("notarization key normalization rejects wrong material, extra content and excessive transformations", () => {
+  const rsa = generateKeyPairSync("rsa", { modulusLength: 1024 }).privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const otherCurve = generateKeyPairSync("ec", { namedCurve: "secp384r1" }).privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  let nested = notaryPem;
+  for (let i = 0; i < 6; i++) nested = Buffer.from(nested).toString("base64");
+  const invalid = [
+    "fixture-key-id", "unrelated text", "./AuthKey_fixture.p8", "", "x".repeat(65_537),
+    rsa, otherCurve, createPublicKey(notaryKey).export({ type: "spki", format: "pem" }).toString(),
+    notaryPem.replaceAll("PRIVATE KEY", "CERTIFICATE"),
+    "unrelated prefix\n" + notaryPem, notaryPem + "unrelated suffix", notaryPem + notaryPem,
+    Buffer.concat([notaryKey.export({ type: "pkcs8", format: "der" }), Buffer.from("extra")]).toString("base64"),
+    nested,
+  ];
+  for (const input of invalid) assert.throws(() => normalizeNotaryKey(input), {
+    message: "macOS signing: APPLE_API_KEY must contain a valid EC P-256 private key (.p8).",
+  });
+});
+
+test("notary-key CLI creates a private temporary file and exports only its path", t => {
+  const f = fixture(t);
+  const envFile = path.join(f.cwd, "github-env");
+  fs.writeFileSync(envFile, "EXISTING=test\n");
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/macos-signing.mjs", import.meta.url)), "notary-key"], {
+    env: { ...process.env, RUNNER_TEMP: f.runnerTemp, GITHUB_ENV: envFile, APPLE_API_KEY: JSON.stringify(notaryPem) },
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), "macOS signing: notarization key format validated.");
+  assert.equal(result.stderr, "");
+  const keyFile = path.join(f.runnerTemp, "PeerGrading-AuthKey.p8");
+  assert.deepEqual(createPublicKey(fs.readFileSync(keyFile)).export({ type: "spki", format: "der" }), notaryPublic);
+  assert.equal(fs.readFileSync(envFile, "utf8"), `EXISTING=test\nAPPLE_API_KEY=${keyFile}\n`);
+  assert.equal(fs.readFileSync(envFile, "utf8").includes(notaryPem), false);
+  if (process.platform !== "win32") assert.equal(fs.statSync(keyFile).mode & 0o777, 0o600);
+});
+
+test("invalid notarization keys do not create files or modify environment exports", t => {
+  const f = fixture(t);
+  const writes: string[] = [];
+  assert.throws(() => prepareNotaryKey({ env: { RUNNER_TEMP: f.runnerTemp, APPLE_API_KEY: "fixture-invalid-key" }, writeEnv: (text: string) => writes.push(text) }), /valid EC P-256 private key/);
+  assert.deepEqual(writes, []);
+  assert.deepEqual(fs.readdirSync(f.runnerTemp), []);
+});
+
+test("notarization key export failures remove the private file and hide sink errors", t => {
+  const f = fixture(t);
+  assert.throws(() => prepareNotaryKey({ env: { RUNNER_TEMP: f.runnerTemp, APPLE_API_KEY: notaryPem }, writeEnv: () => { throw new Error(notaryPem); } }), {
+    message: "macOS signing: could not prepare the temporary notarization key.",
+  });
+  assert.deepEqual(fs.readdirSync(f.runnerTemp), []);
 });

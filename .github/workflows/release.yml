@@ -111,9 +111,7 @@ jobs:
               echo '::error::APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER must be provided together.'
               exit 1
             fi
-            printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/PeerGrading-AuthKey.p8"
-            chmod 600 "$RUNNER_TEMP/PeerGrading-AuthKey.p8"
-            echo "APPLE_API_KEY=$RUNNER_TEMP/PeerGrading-AuthKey.p8" >> "$GITHUB_ENV"
+            node "$RUNNER_TEMP/peergrading-macos-signing.mjs" notary-key
             notarization_ready=1
           elif [ -n "$APPLE_ID" ] || [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -n "$APPLE_TEAM_ID" ]; then
             if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
