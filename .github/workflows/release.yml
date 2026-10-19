@@ -9,7 +9,7 @@ on:
       tag:
         description: Existing version tag to rebuild with the current release workflow
         required: true
-        default: v0.6.5
+        default: v0.6.6
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
