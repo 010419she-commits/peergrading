@@ -45,7 +45,7 @@ macOS 签名和公证不是由文件名推断的：只有构建 Runner 实际具
 
 ### macOS 签名与已有版本重建
 
-Release Runner 将 `CSC_LINK`（Base64 编码的 P12）和 `CSC_KEY_PASSWORD` 导入临时钥匙串。P12 密码只用于证书导入；钥匙串创建、解锁和 `set-key-partition-list` 使用另一份随机密码。签名助手验证 Developer ID Application 身份后，通过 `CSC_KEYCHAIN` 交给 Electron Builder，同时清空 `CSC_LINK`，避开其自动导入路径。构建结束后删除临时钥匙串和公证私钥文件，密码不写入构建日志或产物。
+Release Runner 将 `CSC_LINK`（Base64 编码的 P12）和 `CSC_KEY_PASSWORD` 导入临时钥匙串。P12 密码只用于证书导入；钥匙串创建、解锁和 `set-key-partition-list` 使用另一份随机密码。签名助手验证 Developer ID Application 身份后，通过 `CSC_KEYCHAIN` 交给 Electron Builder。构建进程须 `unset CSC_LINK` 及证书导入密码，避开自动导入路径；仅设置为空字符串仍会被 Electron Builder 当作配置值。构建结束后删除临时钥匙串和公证私钥文件，密码不写入构建日志或产物。
 
 发布前实际运行 `codesign --verify --deep --strict`；启用公证时还必须通过 `xcrun stapler validate` 检查应用携带的票据。不能仅凭上传资产成功声称签名或公证成功。对应模拟测试覆盖两种密码的用途、失败时不导出环境变量、临时材料清理及原钥匙串列表保留。
 

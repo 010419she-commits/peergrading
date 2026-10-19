@@ -62,7 +62,7 @@ export function prepareSigning({ env = process.env, spawnSync = systemSpawnSync,
         !/\b[1-9]\d* valid identities found\b/.test(identities)) {
       throw new Error("macOS signing: no valid Developer ID Application identity was imported.");
     }
-    // CSC_LINK takes precedence over CSC_KEYCHAIN in electron-builder.
+    // Clear inherited credential data; the build shell must then unset CSC_LINK.
     writeEnv(`CSC_KEYCHAIN=${keychainFile}\nCSC_LINK=\n`);
     return { skipped: false, keychainFile };
   } catch (error) {
